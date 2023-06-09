@@ -10,7 +10,7 @@ contract SimpleStablecoin is ERC20, ILenderInterface {
 
     uint256 public constant SCALAR = 1e6;
 
-    mapping(uint256 => uint256[]) public lupToLoanID; // loan id to LUP (loan utilization percentage
+    mapping(uint256 => uint256[]) public lupToLoanID; // loan id to LUP (loan utilization percentage)
     mapping(uint256 => address) public loanToLiquidator; // loan id to liquidator
     uint256[] public lups; // sorted LUPs
     uint256 public constant LIQUIDATION_CR = 0.02e6; // 2%
@@ -58,7 +58,7 @@ contract SimpleStablecoin is ERC20, ILenderInterface {
     }
 
     // avoid needing to go into a loop - maybe autoselect best possible loan
-    function liquidateLoan(uint256 loanId) external override {
+    function liquidateLoan(uint256 loanId) external {
         Loan memory loan = loanCoordinator.getLoan(loanId);
         require(
             loan.startingTime + loan.duration <= block.timestamp,

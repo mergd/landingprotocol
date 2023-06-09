@@ -40,8 +40,6 @@ function calculateInterest(
 abstract contract ILenderInterface {
     function verifyLoan(Loan memory loan) external virtual returns (bool);
 
-    function liquidateLoan(uint256 loanId) external virtual;
-
     function auctionSettledHook(
         Loan memory loan,
         uint256 lenderReturn,
@@ -114,6 +112,7 @@ contract LoanCoordinator {
         loans[loanCount] = newLoan;
 
         // Lender Hook to verify loan details
+        // revert
         ILenderInterface(_lender).verifyLoan(newLoan);
         _collateral.transferFrom(msg.sender, address(this), _collateralAmount);
         _debt.transferFrom(_lender, address(this), _debtAmount);
