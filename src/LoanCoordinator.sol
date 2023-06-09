@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-import "@solmate/utils/SafeTransferLib.sol";
-import "@solmate/tokens/ERC20.sol";
-// import "./ILender.sol";
+import {ERC20} from "@solmate/tokens/ERC20.sol";
+import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 
 struct Loan {
     uint256 id;
@@ -86,6 +85,16 @@ contract LoanCoordinator {
 
     constructor() {}
 
+    /**
+     * @dev User initiates the loan
+     * @param _lender Lender contract
+     * @param _collateral ERC20 Collateral
+     * @param _debt ERC20 debt token
+     * @param _collateralAmount the amount of collateral, denominated in _collateral
+     * @param _debtAmount the amount of debt denominated in _debt
+     * @param _interestRate the APR on the loan (noncompounding)
+     * @param _duration the duration of the loan a selection of one of the durations array
+     */
     function createLoan(
         address _lender,
         ERC20 _collateral,
@@ -93,7 +102,7 @@ contract LoanCoordinator {
         uint256 _collateralAmount,
         uint256 _debtAmount,
         uint256 _interestRate,
-        uint256 _minduration
+        uint8 _duration
     ) external {
         loanCount++;
         Loan memory newLoan = Loan(
@@ -106,14 +115,16 @@ contract LoanCoordinator {
             _debtAmount,
             _interestRate,
             block.timestamp,
-            _minduration
+            durations[_duration]
         );
 
         loans[loanCount] = newLoan;
 
         // Lender Hook to verify loan details
-        // revert
-        ILenderInterface(_lender).verifyLoan(newLoan);
+        require(
+            ILenderInterface(_lender).verifyLoan(newLoan),
+            "Loan not verified"
+        );
         _collateral.transferFrom(msg.sender, address(this), _collateralAmount);
         _debt.transferFrom(_lender, address(this), _debtAmount);
         _debt.transfer(msg.sender, _debtAmount);
@@ -151,7 +162,7 @@ contract LoanCoordinator {
             block.timestamp
         );
         uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtToken.safeTransferFrom(msg.sender, loan.lender, totalDebt);
+        loan.debtToken.transferFrom(msg.sender, loan.lender, totalDebt);
         emit LoanRepaid(_loanId, msg.sender, loan.lender, totalDebt);
 
         // Prevent lender hook from reverting
@@ -170,7 +181,7 @@ contract LoanCoordinator {
         uint256 _interestRate,
         uint256 _duration
     ) internal {
-        uint256 startPrice = ((_amount + _interestRate) * 2) / SCALAR;
+        uint256 startPrice = ((_amount + _interestRate) * 3) / SCALAR;
         uint256 endPrice = (_amount * _interestRate) / (2 * SCALAR);
         Auction memory newAuction = Auction(
             auctions.length,
@@ -259,12 +270,13 @@ contract LoanCoordinator {
     function getLoan(uint256 _loanId) external view returns (Loan memory loan) {
         loan = loans[_loanId];
 
-        // // Account for pending interest
-        // loan.debtAmount += calculateInterest(
-        //     loan.interestRate,
-        //     loan.debtAmount,
-        //     loan.startingTime
-        // );
+        // Account for pending interest for this loan
+        loan.debtAmount += calculateInterest(
+            loan.interestRate,
+            loan.debtAmount,
+            loan.startingTime,
+            block.timestamp
+        );
     }
 
     function getBorrowerLoans(
