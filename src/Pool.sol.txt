@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
+import "./LoanCoordinator.sol";
+import {ERC20} from "@solmate/tokens/ERC20.sol";
+
+contract Pool is ILenderInterface {
+    LoanCoordinator immutable loanCoord;
+    mapping (ERC20 => mapping(ERC20 => uint256[])) public LoanPools;
+
+    constructor(LoanCoordinator _loanCoord) {
+        loanCoord = _loanCoord;
+    }
+    struct lenderPool{
+        address owner;
+        ERC20 cash;
+        ERC20[] collaterals;
+        uint256[] ltvs;
+        address oracle;
+    }
+
+
+    // Morpho linked list impl?
+    function verifyLoan(Loan memory loan) external override returns (bool){
+        uint256[] memory pools = LoanPools[Loan.debtToken][Loan.collateralToken];
+        
+
+    }
+
+    function auctionSettledHook(
+        Loan memory loan,
+        uint256 lenderReturn,
+        uint256 borrowerReturn
+    ) external override{
+
+    }
+
+    function loanRepaidHook(Loan memory loan) external override{
+
+    }
+}
+
