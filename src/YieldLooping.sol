@@ -30,6 +30,7 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         uint256 minCollateralRatio;
         uint256 minDebtAmount;
         uint256 maxDuration;
+        uint256 terms;
         PriceOracle oracle;
         ERC20 collateralToken;
     }
@@ -60,6 +61,7 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
     uint256 public globalKink;
     uint256 public globalBaseRate;
     uint256 public globalJumpMultiplier;
+    uint256 public userAssets;
 
     constructor(
         uint256 _globalKink,
@@ -79,7 +81,8 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
     //                        LENDER INTERFACE OVERRIDES                                          //
     //============================================================================================//
     function verifyLoan(
-        Loan memory loan
+        Loan memory loan,
+        bytes32
     ) external override returns (bool valid) {
         require(msg.sender == address(coordinator), "Only coordinator");
         valid = _verifyLoan(loan);
@@ -118,24 +121,39 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
     //                             4626 Overrides                                                 //
     //============================================================================================//
 
-    function withdraw(
-        uint256 assets,
+    function redeem(
+        uint256 shares,
         address receiver,
         address owner
-    ) public override returns (uint256 shares) {
-        if (assets > asset.balanceOf(address(this))) {
-            // enter withdrawal queue
-            // add logic here
+    ) public override returns (uint256 assets) {
+        processWithdrawalQueue();
+        assets = previewWithdraw(shares);
+        // If there are not enough assets, or if there are pending withdrawals, add to queue
+        if (
+            assets > asset.balanceOf(address(this)) ||
+            withdrawalQueueIndex < withdrawalQueue.length
+        ) {
+            WithdrawalQueue memory queueItem = WithdrawalQueue({
+                caller: msg.sender,
+                owner: owner,
+                receiver: receiver,
+                shares: shares
+            });
+            withdrawalQueue.push(queueItem);
             return 0;
         }
-        shares = previewWithdraw(assets); // No need to check for rounding error, previewWithdraw rounds up.
-
         if (msg.sender != owner) {
             uint256 allowed = allowance[owner][msg.sender]; // Saves gas for limited approvals.
 
             if (allowed != type(uint256).max)
                 allowance[owner][msg.sender] = allowed - shares;
         }
+
+        // Check for rounding error since we round down in previewRedeem.
+        require(assets != 0, "ZERO_ASSETS");
+
+        beforeWithdraw(assets, shares);
+
         _burn(owner, shares);
 
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
@@ -143,12 +161,18 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         asset.safeTransfer(receiver, assets);
     }
 
-    function forceWithdraw(
-        uint256 assets,
+    /**
+     * Force withdraw assets – take on withdraw slippage if necessary
+     * @param assets Assets to withdraw
+     * @param receiver Address to receive assets
+     * @param owner Owner
+     */
+    function forceRedeem(
+        uint256 shares,
         address receiver,
         address owner
-    ) public returns (uint256 shares) {
-        shares = previewWithdraw(assets); // No need to check for rounding error, previewWithdraw rounds up.
+    ) public returns (uint256 assets) {
+        assets = previewWithdraw(shares); // No need to check for rounding error, previewWithdraw rounds up.
 
         if (msg.sender != owner) {
             uint256 allowed = allowance[owner][msg.sender]; // Saves gas for limited approvals.
@@ -167,7 +191,7 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         asset.safeTransfer(receiver, assets);
     }
 
-    function processWithdrawQueue() public {
+    function processWithdrawalQueue() public {
         for (
             uint256 i = withdrawalQueueIndex;
             i < withdrawalQueue.length;
@@ -203,8 +227,8 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         }
     }
 
-    // Brick redeem() to prevent users from redeeming – withdraws only
-    function previewRedeem(uint256) public pure override returns (uint256) {
+    // Brick redeem() to prevent users from withdrawing, redeems only
+    function previewWithdraw(uint256) public pure override returns (uint256) {
         return 0;
     }
 
@@ -212,14 +236,40 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         return debtToken.balanceOf(address(this)) + globalUtilization;
     }
 
-    function processWithdrawalQueue() internal {}
+    function afterDeposit(uint256 assets, uint256) internal override {
+        userAssets += assets;
+    }
 
     //============================================================================================//
     //                                  ADMIN                                                     //
     //============================================================================================//
 
+    function assessFee(uint256 amount) external onlyOwner {
+        require(totalAssets() >= amount + userAssets, "Not enough assets");
+        asset.safeTransfer(msg.sender, amount);
+    }
+
     function liquidate(uint256 loanId) external onlyOwner {
         coordinator.liquidateLoan(loanId);
+    }
+
+    // Liquidate liquidated loans that have not cleared auction
+    function reclaim(uint256 loanId) external onlyOwner {
+        coordinator.reclaim(loanId);
+        // Write down value in global utilization
+    }
+
+    // Claim unrecovered tokens, including tokens from any non reclaimed tokens.
+    function recoverUnsupported(ERC20 token) external onlyOwner {
+        if (token != debtToken)
+            token.transfer(msg.sender, token.balanceOf(address(this)));
+    }
+
+    // Send in proceds from liquidations if there are any
+    function updateUtilization(uint256 amount, ERC20 pair) external onlyOwner {
+        asset.transferFrom(msg.sender, address(this), amount);
+        LoanPairs[pair].vaultUtilization -= amount;
+        // globalUtilization -= amount;
     }
 
     function setGlobalKink(uint256 _globalKink) external onlyOwner {
@@ -275,8 +325,17 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         valid = (pair.minDebtAmount <= loan.debtAmount) ? valid : false;
         valid = (loan.duration <= pair.maxDuration) ? valid : false;
         valid = (loan.interestRate >= _interestRate) ? valid : false;
+        valid = (loan.terms == pair.terms) ? valid : false;
     }
 
+    /**
+     * Calculate local interest rate
+     * @param utilization Pair utilization
+     * @param cap Pair debt cap
+     * @param kink Kink, scaled by SCALAR
+     * @param baseRate Base rate, scaled by SCALAR
+     * @param jumpMultiplier Jump rate past kink, scaled by SCALAR
+     */
     function jumprateModel(
         uint256 utilization,
         uint256 cap,
