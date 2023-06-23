@@ -121,7 +121,7 @@ contract LoanCoordinator {
      * @param _debt ERC20 debt token
      * @param _collateralAmount the amount of collateral, denominated in _collateral
      * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan (noncompounding)
+     * @param _interestRate the APR on the loan (noncompounding) denominated in scalar
      * @param _duration the duration of the loan a selection of one of the durations array
      * @param _terms terms of the loan
      */
