@@ -114,17 +114,6 @@ contract LoanCoordinator {
 
     constructor() {}
 
-    /**
-     * @dev User initiates the loan
-     * @param _lender Lender contract
-     * @param _collateral ERC20 Collateral
-     * @param _debt ERC20 debt token
-     * @param _collateralAmount the amount of collateral, denominated in _collateral
-     * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan (noncompounding) denominated in scalar
-     * @param _duration the duration of the loan a selection of one of the durations array
-     * @param _terms terms of the loan
-     */
     function createLoan(
         address _lender,
         ERC20 _collateral,
@@ -137,6 +126,7 @@ contract LoanCoordinator {
     ) external {
         createLoan(
             _lender,
+            msg.sender,
             _collateral,
             _debt,
             _collateralAmount,
@@ -151,6 +141,7 @@ contract LoanCoordinator {
     /**
      * @dev User initiates the loan
      * @param _lender Lender contract
+     * @param _borrower Borrower address
      * @param _collateral ERC20 Collateral
      * @param _debt ERC20 debt token
      * @param _collateralAmount the amount of collateral, denominated in _collateral
@@ -162,6 +153,7 @@ contract LoanCoordinator {
      */
     function createLoan(
         address _lender,
+        address _borrower,
         ERC20 _collateral,
         ERC20 _debt,
         uint256 _collateralAmount,
@@ -174,7 +166,7 @@ contract LoanCoordinator {
         loanCount++;
         Loan memory newLoan = Loan(
             loanCount,
-            msg.sender,
+            _borrower,
             _lender,
             _collateral,
             _debt,
@@ -222,6 +214,10 @@ contract LoanCoordinator {
     }
 
     function repayLoan(uint256 _loanId) external {
+        repayLoan(_loanId, msg.sender);
+    }
+
+    function repayLoan(uint256 _loanId, address onBehalfof) public {
         Loan memory loan = loans[_loanId];
         uint256 interest = calculateInterest(
             loan.interestRate,
@@ -230,8 +226,8 @@ contract LoanCoordinator {
             block.timestamp
         );
         uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtToken.transferFrom(msg.sender, loan.lender, totalDebt);
-        emit LoanRepaid(_loanId, msg.sender, loan.lender, totalDebt);
+        loan.debtToken.transferFrom(onBehalfof, loan.lender, totalDebt);
+        emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
 
         // Prevent lender hook from reverting
         try ILenderInterface(loan.lender).loanRepaidHook(loan) {} catch {}
