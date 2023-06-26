@@ -29,4 +29,10 @@ contract MockLender is ILenderInterface {
     function liquidate(uint256 loan) external {
         coordinator.liquidateLoan(loan);
     }
+
+    function getQuote(
+        Loan memory
+    ) external pure override returns (uint256, uint256, uint256) {
+        return (0, 0, 0);
+    }
 }

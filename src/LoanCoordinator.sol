@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.17;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
@@ -56,6 +56,19 @@ abstract contract ILenderInterface {
     ) external virtual;
 
     function loanRepaidHook(Loan memory loan) external virtual;
+
+    /**
+     * @dev Could be optimized
+     * @param loan Pass in a loan struct.
+     *      loan.debtAmount == Max Uint -> Max borrowable
+     *      loan.collateralAmount == Max Uint -> Min Collateral required
+     * @return _interest Provide the interest rate for given params
+     * @return _lendAmount Provide the amount that can be borrowed
+     * @return _collateral Provide the amount of collateral required
+     */
+    function getQuote(
+        Loan memory loan
+    ) external view virtual returns (uint256, uint256, uint256);
 }
 
 contract LoanCoordinator {
@@ -185,9 +198,13 @@ contract LoanCoordinator {
             ILenderInterface(_lender).verifyLoan(newLoan, _data),
             "Loan not verified"
         );
-        _collateral.transferFrom(msg.sender, address(this), _collateralAmount);
-        _debt.transferFrom(_lender, address(this), _debtAmount);
-        _debt.transfer(msg.sender, _debtAmount);
+        _collateral.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _collateralAmount
+        );
+        _debt.safeTransferFrom(_lender, address(this), _debtAmount);
+        _debt.safeTransfer(msg.sender, _debtAmount);
 
         borrowerLoans[msg.sender].push(loanCount);
         lenderLoans[_lender].push(loanCount);
@@ -226,7 +243,7 @@ contract LoanCoordinator {
             block.timestamp
         );
         uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtToken.transferFrom(onBehalfof, loan.lender, totalDebt);
+        loan.debtToken.safeTransferFrom(onBehalfof, loan.lender, totalDebt);
         emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
 
         // Prevent lender hook from reverting
@@ -269,8 +286,12 @@ contract LoanCoordinator {
             "Auction has ended"
         );
         uint256 currentPrice = getCurrentPrice(_auctionId);
-        loan.debtToken.transferFrom(msg.sender, address(this), currentPrice);
-        loan.collateralToken.transfer(msg.sender, loan.collateralAmount);
+        loan.debtToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            currentPrice
+        );
+        loan.collateralToken.safeTransfer(msg.sender, loan.collateralAmount);
 
         uint256 interest = calculateInterest(
             loan.interestRate,
@@ -286,7 +307,7 @@ contract LoanCoordinator {
             : _lenderClearing;
         uint256 borrowerReturn = currentPrice - lenderReturn;
 
-        loan.debtToken.transfer(loan.lender, lenderReturn);
+        loan.debtToken.safeTransfer(loan.lender, lenderReturn);
 
         // Prevent lender hook from reverting
         try
@@ -298,7 +319,7 @@ contract LoanCoordinator {
         {} catch {}
 
         if (borrowerReturn > 0) {
-            loan.debtToken.transfer(loan.borrower, borrowerReturn);
+            loan.debtToken.safeTransfer(loan.borrower, borrowerReturn);
         }
         emit AuctionSettled(_auctionId, msg.sender, currentPrice);
     }
@@ -315,7 +336,7 @@ contract LoanCoordinator {
             "Auction has not ended"
         );
         Loan memory loan = loans[auction.loanId];
-        loan.collateralToken.transfer(loan.lender, loan.collateralAmount);
+        loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
 
         delete auctions[_auctionId];
         delete loanIdToAuction[auction.loanId];

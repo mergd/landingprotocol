@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-import "./LoanCoordinator.sol";
+import "../LoanCoordinator.sol";
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {ERC4626} from "@solmate/mixins/ERC4626.sol";
 import {Owned} from "@solmate/auth/Owned.sol";
@@ -115,6 +115,60 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         // Update vault utilization
         LoanPairs[loan.collateralToken].vaultUtilization -= loan.debtAmount;
         processWithdrawalQueue();
+    }
+
+    function getQuote(
+        Loan memory loan
+    )
+        external
+        view
+        override
+        returns (uint256 _interest, uint256 _borrow, uint256 _collateral)
+    {
+        LoanPair memory pair = LoanPairs[loan.collateralToken];
+
+        uint256 _price = pair.oracle.price(
+            address(loan.collateralToken),
+            address(loan.debtToken)
+        );
+        if (loan.debtAmount == type(uint256).max) {
+            uint256 amt = (loan.collateralAmount *
+                _price *
+                pair.minCollateralRatio) / (SCALAR * SCALAR);
+            _borrow = (pair.vaultCap >= pair.vaultUtilization + amt)
+                ? amt
+                : pair.vaultCap - pair.vaultUtilization;
+            loan.debtAmount = _borrow;
+        } else if (loan.collateralAmount == type(uint256).max) {
+            _collateral =
+                (loan.debtAmount * SCALAR * SCALAR) /
+                (_price * pair.minCollateralRatio);
+            _borrow = loan.debtAmount;
+        } else {
+            _borrow = loan.debtAmount;
+        }
+
+        _interest = jumprateModel(
+            pair.vaultUtilization + _borrow,
+            pair.vaultCap,
+            pair.kink,
+            pair.baseRate,
+            pair.jumpMultiplier
+        );
+        // Basic checks
+        bool valid;
+        valid = (loan.debtToken == debtToken) ? true : false;
+        valid = (pair.vaultCap >= pair.vaultUtilization + loan.debtAmount)
+            ? valid
+            : false;
+        valid = (pair.minCollateralRatio <=
+            (loan.collateralAmount * _price) / loan.debtAmount)
+            ? valid
+            : false;
+        valid = (pair.minDebtAmount <= loan.debtAmount) ? valid : false;
+        valid = (loan.duration <= pair.maxDuration) ? valid : false;
+        valid = (loan.terms == pair.terms) ? valid : false;
+        if (valid) return (0, 0, 0);
     }
 
     //============================================================================================//
@@ -265,11 +319,11 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
             token.transfer(msg.sender, token.balanceOf(address(this)));
     }
 
-    // Send in proceds from liquidations if there are any
+    // Send in proceds from manually processed liquidations if there are any
     function updateUtilization(uint256 amount, ERC20 pair) external onlyOwner {
         asset.transferFrom(msg.sender, address(this), amount);
         LoanPairs[pair].vaultUtilization -= amount;
-        // globalUtilization -= amount;
+        globalUtilization -= amount;
     }
 
     function setGlobalKink(uint256 _globalKink) external onlyOwner {
@@ -301,7 +355,7 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
     //============================================================================================//
 
     function _verifyLoan(Loan memory loan) public view returns (bool valid) {
-        LoanPair storage pair = LoanPairs[loan.collateralToken];
+        LoanPair memory pair = LoanPairs[loan.collateralToken];
         uint256 _price = pair.oracle.price(
             address(loan.collateralToken),
             address(loan.debtToken)
