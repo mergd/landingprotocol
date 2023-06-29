@@ -18,7 +18,7 @@ interface PriceOracle {
     ) external view returns (uint256);
 }
 
-contract YieldLooping is ILenderInterface, Owned, ERC4626 {
+contract YieldLooping is Lender, Owned, ERC4626 {
     using SafeTransferLib for ERC20;
 
     struct LoanPair {
@@ -53,9 +53,7 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
 
     mapping(ERC20 => LoanPair) public LoanPairs;
 
-    uint256 private constant SCALAR = 1e6;
     ERC20 public immutable debtToken;
-    LoanCoordinator public immutable coordinator;
 
     uint256 public globalUtilization;
     uint256 public globalKink;
@@ -69,12 +67,15 @@ contract YieldLooping is ILenderInterface, Owned, ERC4626 {
         uint256 _globalJumpMultiplier,
         ERC20 _debtToken,
         LoanCoordinator _coordinator
-    ) Owned(msg.sender) ERC4626(_debtToken, "Yield Token", "YLDL") {
+    )
+        Owned(msg.sender)
+        ERC4626(_debtToken, "Yield Token", "YLDL")
+        Lender(_coordinator)
+    {
         globalKink = _globalKink;
         globalBaseRate = _globalBaseRate;
         globalJumpMultiplier = _globalJumpMultiplier;
         debtToken = _debtToken;
-        coordinator = _coordinator;
     }
 
     //============================================================================================//

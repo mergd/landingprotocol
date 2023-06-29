@@ -22,6 +22,7 @@ struct Terms {
     uint256 liquidationBonus;
     uint256 dutchAuctionMultiplier;
     uint256 settlementMultiplier;
+    uint256 auctionLength;
 }
 
 struct Auction {
@@ -33,6 +34,31 @@ struct Auction {
     uint256 endingPrice;
 }
 
+uint256 constant SCALAR = 1e6;
+
+//
+// function calculateInterest(
+//     uint256 _interestRate,
+//     uint256 _debtAmount,
+//     uint256 _startTime,
+//     uint256 _endTime
+// ) pure returns (uint256 interest) {
+//     uint256 t = ((_endTime - _startTime) * _interestRate) / 365 days;
+//     interest = (_debtAmount * exp(t, 18)) / SCALAR - _debtAmount;
+// }
+
+// function exp(uint256 x, uint256 precision) pure returns (uint256 result) {
+//     uint256 term = 1;
+//     result = term;
+//     for (uint256 i = 1; i <= 10; i++) {
+//         term = (term * x) / i;
+//         result += term;
+//     }
+//     result = (result * (10 ** precision)) / (2 ** precision);
+// }
+
+// Use the autocompounding or simple interest, above is the autocompounding
+// Calculate notional accrued interest
 function calculateInterest(
     uint256 _interestRate,
     uint256 _debtAmount,
@@ -40,10 +66,18 @@ function calculateInterest(
     uint256 _endTime
 ) pure returns (uint256 interest) {
     uint256 timeElapsed = _endTime - _startTime;
-    interest = (_interestRate * _debtAmount * timeElapsed) / (3.1536 * 1e13);
+    interest =
+        (_interestRate * _debtAmount * timeElapsed) /
+        (365 days * SCALAR);
 }
 
-abstract contract ILenderInterface {
+abstract contract Lender {
+    constructor(LoanCoordinator _coordinator) {
+        coordinator = _coordinator;
+    }
+
+    LoanCoordinator public immutable coordinator;
+
     function verifyLoan(
         Loan memory loan,
         bytes32 data
@@ -71,15 +105,29 @@ abstract contract ILenderInterface {
     ) external view virtual returns (uint256, uint256, uint256);
 }
 
+// Optional interface for borrowers to implement
+abstract contract Borrower {
+    constructor(LoanCoordinator _coordinator) {
+        coordinator = _coordinator;
+    }
+
+    LoanCoordinator public immutable coordinator;
+
+    function liquidationHook(Loan memory loan) external virtual;
+
+    function auctionSettledHook(
+        Loan memory loan,
+        uint256 lenderReturn,
+        uint256 borrowerReturn
+    ) external virtual;
+}
+
 contract LoanCoordinator {
     using SafeTransferLib for ERC20;
 
     uint256 public loanCount;
-    // uint256 public constant LIQUIDATION_BONUS = 1.005e6; // 0.5% fixed bonus
 
-    uint256 public constant SCALAR = 1e6;
-
-    uint256[] public durations = [8 hours, 1 days, 2 days, 0];
+    uint256[] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
 
     Auction[] public auctions;
     Terms[] public loanTerms;
@@ -159,7 +207,7 @@ contract LoanCoordinator {
      * @param _debt ERC20 debt token
      * @param _collateralAmount the amount of collateral, denominated in _collateral
      * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan (noncompounding)
+     * @param _interestRate the APR on the loan, scaled by SCALAR (noncompounding)
      * @param _duration the duration of the loan a selection of one of the durations array
      * @param _terms terms of the loan
      * @param _data data to be passed to the lender contract
@@ -195,7 +243,7 @@ contract LoanCoordinator {
 
         // Lender Hook to verify loan details
         require(
-            ILenderInterface(_lender).verifyLoan(newLoan, _data),
+            Lender(_lender).verifyLoan(newLoan, _data),
             "Loan not verified"
         );
         _collateral.safeTransferFrom(
@@ -226,8 +274,14 @@ contract LoanCoordinator {
             block.timestamp
         );
         uint256 totalDebt = loan.debtAmount + interest;
-        startAuction(_loanId, totalDebt, interest, loan.duration, loan.terms);
+        startAuction(_loanId, totalDebt, interest, loan.terms);
+
         loan.duration = 0; // Auction off loan
+
+        // Borrower Hook
+        if (isContract(loan.borrower)) {
+            try Borrower(loan.borrower).liquidationHook(loan) {} catch {}
+        }
     }
 
     function repayLoan(uint256 _loanId) external {
@@ -247,7 +301,7 @@ contract LoanCoordinator {
         emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
 
         // Prevent lender hook from reverting
-        try ILenderInterface(loan.lender).loanRepaidHook(loan) {} catch {}
+        try Lender(loan.lender).loanRepaidHook(loan) {} catch {}
 
         if (loan.duration == 0) delete auctions[loanIdToAuction[_loanId]];
     }
@@ -258,7 +312,6 @@ contract LoanCoordinator {
         uint256 _loanId,
         uint256 _amount,
         uint256 _interestRate,
-        uint256 _duration,
         uint256 _terms
     ) internal {
         Terms memory terms = loanTerms[_terms];
@@ -269,7 +322,7 @@ contract LoanCoordinator {
         Auction memory newAuction = Auction(
             auctions.length,
             _loanId,
-            _duration,
+            terms.auctionLength,
             startPrice,
             block.timestamp,
             endPrice
@@ -311,12 +364,23 @@ contract LoanCoordinator {
 
         // Prevent lender hook from reverting
         try
-            ILenderInterface(loan.lender).auctionSettledHook(
+            Lender(loan.lender).auctionSettledHook(
                 loan,
                 lenderReturn,
                 borrowerReturn
             )
         {} catch {}
+
+        // Borrower Hook
+        if (isContract(loan.borrower)) {
+            try
+                Borrower(loan.borrower).auctionSettledHook(
+                    loan,
+                    lenderReturn,
+                    borrowerReturn
+                )
+            {} catch {}
+        }
 
         if (borrowerReturn > 0) {
             loan.debtToken.safeTransfer(loan.borrower, borrowerReturn);
@@ -389,5 +453,13 @@ contract LoanCoordinator {
         address _lender
     ) external view returns (uint256[] memory) {
         return lenderLoans[_lender];
+    }
+
+    function isContract(address _addr) private view returns (bool) {
+        uint256 size;
+        assembly {
+            size := extcodesize(_addr)
+        }
+        return size > 0;
     }
 }

@@ -3,11 +3,13 @@ pragma solidity ^0.8.17;
 
 import "src/LoanCoordinator.sol";
 
-contract MockLender is ILenderInterface {
+contract MockLender is Lender {
     LoanCoordinator coordinator;
 
-    constructor(LoanCoordinator _coordinator, ERC20 _debt) {
-        coordinator = _coordinator;
+    constructor(
+        LoanCoordinator _coordinator,
+        ERC20 _debt
+    ) Lender(_coordinator) {
         _debt.approve(address(coordinator), type(uint256).max);
     }
 

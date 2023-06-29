@@ -8,7 +8,7 @@ import "@solmate/auth/Owned.sol";
 contract LenderRegistry is Owned {
     LoanCoordinator public immutable loanCoordinator;
 
-    mapping(bytes32 => ILenderInterface[]) public lenders;
+    mapping(bytes32 => Lender[]) public lenders;
 
     constructor(LoanCoordinator _coordinator, address _owner) Owned(_owner) {
         loanCoordinator = _coordinator;
@@ -18,7 +18,7 @@ contract LenderRegistry is Owned {
         uint256 _pair,
         address _collateral,
         address _debt,
-        ILenderInterface _lender
+        Lender _lender
     ) public onlyOwner {
         bytes32 key = keccak256(abi.encodePacked(_pair, _collateral, _debt));
         lenders[key].push(_lender);
@@ -28,11 +28,11 @@ contract LenderRegistry is Owned {
         uint256 _pair,
         address _collateral,
         address _debt,
-        ILenderInterface _lender,
+        Lender _lender,
         uint256 _id
     ) public onlyOwner {
         bytes32 key = keccak256(abi.encodePacked(_pair, _collateral, _debt));
-        ILenderInterface[] storage lenderList = lenders[key];
+        Lender[] storage lenderList = lenders[key];
         require(lenderList[_id] == _lender, "INVALID_LENDER");
         // Remove the lender from the list
         lenderList[_id] = lenderList[lenderList.length - 1];
@@ -59,7 +59,7 @@ contract LenderRegistry is Owned {
         uint256 _interest
     ) public view returns (Loan memory loan) {
         bytes32 key = keccak256(abi.encodePacked(_pair, _collateral, _debt));
-        ILenderInterface[] memory lenderList = lenders[key];
+        Lender[] memory lenderList = lenders[key];
         loan.debtAmount = _debtAmount;
         loan.collateralAmount = _collateralAmount;
         loan.interestRate = _interest;
@@ -93,7 +93,7 @@ contract LenderRegistry is Owned {
                 _duration,
                 _pair
             );
-            ILenderInterface _lender = lenderList[i];
+            Lender _lender = lenderList[i];
             (uint256 interest, uint256 borrow, uint256 collateral) = _lender
                 .getQuote(_loan);
             if (interest + borrow + collateral == 0) {
