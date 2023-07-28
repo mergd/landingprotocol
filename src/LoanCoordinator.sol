@@ -108,10 +108,10 @@ abstract contract Borrower {
 
 contract LoanCoordinator {
     using SafeTransferLib for ERC20;
-
+    /** STATE  */
     uint256 public loanCount;
 
-    uint256[] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
+    uint256[5] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
 
     Auction[] public auctions;
     Terms[] public loanTerms;
@@ -125,35 +125,18 @@ contract LoanCoordinator {
         address indexed lender,
         uint256 amount
     );
-    event LoanCreated(
-        uint256 indexed id,
-        address indexed borrower,
-        address indexed lender,
-        ERC20 collateralToken,
-        ERC20 debtToken,
-        uint256 collateralAmount,
-        uint256 debtAmount,
-        uint256 interestRate,
-        uint256 startingTime,
-        uint256 duration,
-        uint256 terms
-    );
+    event LoanCreated(uint256 indexed id, Loan loan);
 
-    event AuctionCreated(
-        uint256 indexed id,
-        uint256 indexed loanId,
-        uint256 duration,
-        uint256 startingPrice,
-        uint256 startingTime,
-        uint256 endingPrice
-    );
+    event AuctionCreated(Auction auction);
     event AuctionSettled(
         uint256 indexed auction,
         address bidder,
         uint256 price
     );
-    event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
 
+    event RateRebalanced(uint256 indexed loanId, uint256 newRate);
+    event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
+    event LoanLiquidated(uint256 indexed loanId);
     event TermsSet(uint256 termId, Terms term);
 
     constructor() {}
@@ -167,19 +150,20 @@ contract LoanCoordinator {
         uint256 _interestRate,
         uint256 _duration,
         uint256 _terms
-    ) external {
-        createLoan(
-            _lender,
-            msg.sender,
-            _collateral,
-            _debt,
-            _collateralAmount,
-            _debtAmount,
-            _interestRate,
-            _duration,
-            _terms,
-            ""
-        );
+    ) external returns (uint256) {
+        return
+            createLoan(
+                _lender,
+                msg.sender,
+                _collateral,
+                _debt,
+                _collateralAmount,
+                _debtAmount,
+                _interestRate,
+                _duration,
+                _terms,
+                ""
+            );
     }
 
     /**
@@ -206,7 +190,7 @@ contract LoanCoordinator {
         uint256 _duration,
         uint256 _terms,
         bytes32 _data
-    ) public {
+    ) public returns (uint256) {
         loanCount++;
         Loan memory newLoan = Loan(
             loanCount,
@@ -237,7 +221,9 @@ contract LoanCoordinator {
 
         borrowerLoans[_borrower].push(loanCount);
         _debt.safeTransferFrom(_lender, address(this), _debtAmount);
-        _debt.safeTransfer(msg.sender, _debtAmount);
+        _debt.transfer(msg.sender, _debtAmount);
+        emit LoanCreated(loanCount, newLoan);
+        return loanCount;
     }
 
     function liquidateLoan(uint256 _loanId) external {
@@ -247,7 +233,7 @@ contract LoanCoordinator {
             "Coordinator: Only lender can liquidate"
         );
         if (
-            loan.duration + loan.startingTime > block.timestamp ||
+            loan.duration + loan.startingTime <= block.timestamp ||
             loan.duration == type(uint256).max
         ) {
             revert(
@@ -261,7 +247,7 @@ contract LoanCoordinator {
             block.timestamp
         );
         uint256 totalDebt = loan.debtAmount + interest;
-        startAuction(_loanId, totalDebt, interest, loan.terms);
+        startAuction(_loanId, totalDebt, loan.terms);
 
         loan.duration = type(uint256).max; // Auction off loan
 
@@ -269,6 +255,7 @@ contract LoanCoordinator {
         if (isContract(loan.borrower)) {
             try Borrower(loan.borrower).liquidationHook(loan) {} catch {}
         }
+        emit LoanLiquidated(_loanId);
     }
 
     function repayLoan(uint256 _loanId) external {
@@ -285,12 +272,13 @@ contract LoanCoordinator {
         );
         uint256 totalDebt = loan.debtAmount + interest;
         loan.debtToken.safeTransferFrom(onBehalfof, loan.lender, totalDebt);
-        emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
 
         // Prevent lender hook from reverting
         try Lender(loan.lender).loanRepaidHook(loan) {} catch {}
         deleteLoan(_loanId, loan.borrower);
         if (loan.duration == 0) delete auctions[loanIdToAuction[_loanId]];
+
+        emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
     }
 
     /// Rebalance the interest rate
@@ -326,6 +314,7 @@ contract LoanCoordinator {
                 Borrower(loan.borrower).interestRateUpdateHook(loan, _newRate)
             {} catch {}
         }
+        emit RateRebalanced(_loanId, _newRate);
     }
 
     // AUCTION LOGIC
@@ -333,14 +322,11 @@ contract LoanCoordinator {
     function startAuction(
         uint256 _loanId,
         uint256 _amount,
-        uint256 _interestRate,
         uint256 _terms
     ) internal {
         Terms memory terms = loanTerms[_terms];
-        uint256 startPrice = ((_amount + _interestRate) *
-            terms.dutchAuctionMultiplier) / SCALAR;
-        uint256 endPrice = (_amount * _interestRate) /
-            (terms.settlementMultiplier * SCALAR);
+        uint256 startPrice = (_amount * terms.dutchAuctionMultiplier) / SCALAR;
+        uint256 endPrice = _amount / (terms.settlementMultiplier * SCALAR);
         Auction memory newAuction = Auction(
             auctions.length,
             _loanId,
@@ -350,6 +336,7 @@ contract LoanCoordinator {
             endPrice
         );
         auctions.push(newAuction);
+        emit AuctionCreated(newAuction);
     }
 
     function bid(uint256 _auctionId) external {
@@ -382,6 +369,8 @@ contract LoanCoordinator {
             : _lenderClearing;
         uint256 borrowerReturn = currentPrice - lenderReturn;
 
+        deleteLoan(auction.loanId, loan.borrower);
+
         loan.debtToken.safeTransfer(loan.lender, lenderReturn);
 
         // Prevent lender hook from reverting
@@ -403,7 +392,6 @@ contract LoanCoordinator {
                 )
             {} catch {}
         }
-        deleteLoan(auction.loanId, loan.borrower);
         if (borrowerReturn > 0) {
             loan.debtToken.safeTransfer(loan.borrower, borrowerReturn);
         }
@@ -420,10 +408,11 @@ contract LoanCoordinator {
         );
 
         Loan memory loan = loans[auction.loanId];
-        loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
-        deleteLoan(auction.loanId, loan.borrower);
         delete auctions[_auctionId];
         delete loanIdToAuction[auction.loanId];
+
+        loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
+        deleteLoan(auction.loanId, loan.borrower);
 
         emit AuctionReclaimed(_auctionId, loan.collateralAmount);
     }

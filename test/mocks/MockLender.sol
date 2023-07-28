@@ -4,8 +4,6 @@ pragma solidity ^0.8.17;
 import "src/LoanCoordinator.sol";
 
 contract MockLender is Lender {
-    LoanCoordinator coordinator;
-
     constructor(
         LoanCoordinator _coordinator,
         ERC20 _debt
@@ -30,6 +28,10 @@ contract MockLender is Lender {
 
     function liquidate(uint256 loan) external {
         coordinator.liquidateLoan(loan);
+    }
+
+    function rebalanceRate(uint256 loan, uint256 newRate) external {
+        coordinator.rebalanceRate(loan, newRate);
     }
 
     function getQuote(
