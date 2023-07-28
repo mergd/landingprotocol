@@ -17,8 +17,8 @@ contract LoanCoordinatorTest is Test {
 
     function setUp() external {
         coordinator = new LoanCoordinator();
-        Terms memory _term = Terms(1.005 * 1e6, 3, 2);
-        coordinator.setTerms(_term);
+        Terms memory _term = Terms(1.005 * 1e6, 3, 2, 1000);
+        uint256 termNum = coordinator.setTerms(_term);
         _collateral = new MockERC20("LEND", "LENDING TOKEN", 18);
         _borrow = new MockERC20("BORROW", "BORROWING TOKEN", 18);
         _lender = new MockLender(coordinator, _borrow);

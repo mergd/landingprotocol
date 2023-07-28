@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPLv3
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
@@ -35,27 +35,6 @@ struct Auction {
 }
 
 uint256 constant SCALAR = 1e6;
-
-//
-// function calculateInterest(
-//     uint256 _interestRate,
-//     uint256 _debtAmount,
-//     uint256 _startTime,
-//     uint256 _endTime
-// ) pure returns (uint256 interest) {
-//     uint256 t = ((_endTime - _startTime) * _interestRate) / 365 days;
-//     interest = (_debtAmount * exp(t, 18)) / SCALAR - _debtAmount;
-// }
-
-// function exp(uint256 x, uint256 precision) pure returns (uint256 result) {
-//     uint256 term = 1;
-//     result = term;
-//     for (uint256 i = 1; i <= 10; i++) {
-//         term = (term * x) / i;
-//         result += term;
-//     }
-//     result = (result * (10 ** precision)) / (2 ** precision);
-// }
 
 // Use the autocompounding or simple interest, above is the autocompounding
 // Calculate notional accrued interest
@@ -105,7 +84,7 @@ abstract contract Lender {
     ) external view virtual returns (uint256, uint256, uint256);
 }
 
-// Optional interface for borrowers to implement
+/// @dev Optional interface for borrowers to implement
 abstract contract Borrower {
     constructor(LoanCoordinator _coordinator) {
         coordinator = _coordinator;
@@ -114,6 +93,11 @@ abstract contract Borrower {
     LoanCoordinator public immutable coordinator;
 
     function liquidationHook(Loan memory loan) external virtual;
+
+    function interestRateUpdateHook(
+        Loan memory loan,
+        uint256 newRate
+    ) external virtual;
 
     function auctionSettledHook(
         Loan memory loan,
@@ -134,8 +118,7 @@ contract LoanCoordinator {
     mapping(uint256 => uint256) public loanIdToAuction;
     mapping(uint256 => Loan) public loans;
     mapping(address => uint256[]) public borrowerLoans;
-    mapping(address => uint256[]) public lenderLoans;
-
+    // Lender loans should be tracked in lender contract
     event LoanRepaid(
         uint256 indexed id,
         address indexed borrower,
@@ -244,28 +227,32 @@ contract LoanCoordinator {
         // Lender Hook to verify loan details
         require(
             Lender(_lender).verifyLoan(newLoan, _data),
-            "Loan not verified"
+            "Coordinator: Loan not verified"
         );
         _collateral.safeTransferFrom(
             msg.sender,
             address(this),
             _collateralAmount
         );
+
+        borrowerLoans[_borrower].push(loanCount);
         _debt.safeTransferFrom(_lender, address(this), _debtAmount);
         _debt.safeTransfer(msg.sender, _debtAmount);
-
-        borrowerLoans[msg.sender].push(loanCount);
-        lenderLoans[_lender].push(loanCount);
     }
 
     function liquidateLoan(uint256 _loanId) external {
         Loan storage loan = loans[_loanId];
-        require(loan.lender == msg.sender, "Only lender can liquidate");
+        require(
+            loan.lender == msg.sender,
+            "Coordinator: Only lender can liquidate"
+        );
         if (
             loan.duration + loan.startingTime > block.timestamp ||
-            loan.duration == 0
+            loan.duration == type(uint256).max
         ) {
-            revert("Loan not yet liquidatable");
+            revert(
+                "Coordinator: Loan not yet liquidatable or is already in auction"
+            );
         }
         uint256 interest = calculateInterest(
             loan.interestRate,
@@ -276,7 +263,7 @@ contract LoanCoordinator {
         uint256 totalDebt = loan.debtAmount + interest;
         startAuction(_loanId, totalDebt, interest, loan.terms);
 
-        loan.duration = 0; // Auction off loan
+        loan.duration = type(uint256).max; // Auction off loan
 
         // Borrower Hook
         if (isContract(loan.borrower)) {
@@ -302,8 +289,43 @@ contract LoanCoordinator {
 
         // Prevent lender hook from reverting
         try Lender(loan.lender).loanRepaidHook(loan) {} catch {}
-
+        deleteLoan(_loanId, loan.borrower);
         if (loan.duration == 0) delete auctions[loanIdToAuction[_loanId]];
+    }
+
+    /// Rebalance the interest rate
+    /// @param _loanId the loan to rebalance
+    /// @param _newRate the new rate
+    function rebalanceRate(uint256 _loanId, uint256 _newRate) external {
+        // Prevent lender hook from reverting
+        Loan storage loan = loans[_loanId];
+        require(
+            loan.lender == msg.sender,
+            "Coordinator: Only lender can rebalance the rate"
+        );
+        if (loan.duration + loan.startingTime > block.timestamp) {
+            revert("Coordinator: Loan not yet adjustable");
+        }
+        // Add a check to prevent rate from being too high – maximum rate is 200% APY
+        if (_newRate >= SCALAR * 2) {
+            revert("Coordinator: New rate is too high");
+        }
+        uint256 interest = calculateInterest(
+            loan.interestRate,
+            loan.debtAmount,
+            loan.startingTime,
+            block.timestamp
+        );
+        uint256 totalDebt = loan.debtAmount + interest;
+        loan.debtAmount = totalDebt;
+        loan.startingTime = block.timestamp; // Reset starting time
+        loan.interestRate = _newRate;
+        // Borrower Hook
+        if (isContract(loan.borrower)) {
+            try
+                Borrower(loan.borrower).interestRateUpdateHook(loan, _newRate)
+            {} catch {}
+        }
     }
 
     // AUCTION LOGIC
@@ -336,7 +358,7 @@ contract LoanCoordinator {
         Terms memory terms = loanTerms[loan.terms];
         require(
             auction.startingTime + auction.duration > block.timestamp,
-            "Auction has ended"
+            "Coordinator: Auction has ended"
         );
         uint256 currentPrice = getCurrentPrice(_auctionId);
         loan.debtToken.safeTransferFrom(
@@ -381,7 +403,7 @@ contract LoanCoordinator {
                 )
             {} catch {}
         }
-
+        deleteLoan(auction.loanId, loan.borrower);
         if (borrowerReturn > 0) {
             loan.debtToken.safeTransfer(loan.borrower, borrowerReturn);
         }
@@ -392,16 +414,14 @@ contract LoanCoordinator {
         // reclaim collateral is auction is lapsed
         Auction memory auction = auctions[_auctionId];
         require(
-            auction.startingTime + auction.duration < block.timestamp,
-            "Auction has not ended"
+            auction.startingTime + auction.duration < block.timestamp ||
+                auction.endingPrice == auction.startingPrice,
+            "Coordinator: Auction has not ended"
         );
-        require(
-            auction.endingPrice == auction.startingPrice,
-            "Auction has not ended"
-        );
+
         Loan memory loan = loans[auction.loanId];
         loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
-
+        deleteLoan(auction.loanId, loan.borrower);
         delete auctions[_auctionId];
         delete loanIdToAuction[auction.loanId];
 
@@ -429,6 +449,20 @@ contract LoanCoordinator {
         return loanTerms.length - 1;
     }
 
+    // ⛽️🙀 can and should be optimized
+    function deleteLoan(uint256 _loanId, address _borrower) internal {
+        // Delete _loanId from borrowerLoans and lenderLoans
+        uint256[] storage borrowerLoanIds = borrowerLoans[_borrower];
+        uint256 borrowerLoanIdsLength = borrowerLoanIds.length;
+        for (uint256 i = 0; i < borrowerLoanIdsLength; i++) {
+            if (borrowerLoanIds[i] == _loanId) {
+                borrowerLoanIds[i] = borrowerLoanIds[borrowerLoanIdsLength - 1];
+                borrowerLoanIds.pop();
+                break;
+            }
+        }
+    }
+
     // VIEW FUNCTIONS
 
     function getLoan(uint256 _loanId) external view returns (Loan memory loan) {
@@ -441,18 +475,6 @@ contract LoanCoordinator {
             loan.startingTime,
             block.timestamp
         );
-    }
-
-    function getBorrowerLoans(
-        address _borrower
-    ) external view returns (uint256[] memory) {
-        return borrowerLoans[_borrower];
-    }
-
-    function getLenderLoans(
-        address _lender
-    ) external view returns (uint256[] memory) {
-        return lenderLoans[_lender];
     }
 
     function isContract(address _addr) private view returns (bool) {
