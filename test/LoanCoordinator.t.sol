@@ -59,12 +59,34 @@ contract LoanCoordinatorTest is Test {
             0
         );
 
-        vm.warp(8 hours - 1);
+        vm.warp(8 hours + 1);
         // _lender.liquidate(0);
         // vm.expectRevert();
 
-        vm.warp(1);
         _lender.liquidate(1);
+    }
+
+    function testBid() public {
+        _borrow.mint(address(_lender), 1000e18);
+        collateralmintAndApprove(_borrower, 1000 * 1e18);
+        vm.startPrank(_borrower);
+        uint256 _loan = coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            1,
+            0
+        );
+
+        vm.warp(10 days);
+        _lender.liquidate(_loan);
+        vm.startPrank(address(1));
+        _collateral.mint(address(1), 2e18);
+        _borrow.approve(address(coordinator), 2e18);
+        coordinator.bid(0);
     }
 
     function testRebalanceRate() public {

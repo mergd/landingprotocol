@@ -221,19 +221,19 @@ contract LoanCoordinator {
 
         borrowerLoans[_borrower].push(loanCount);
         _debt.safeTransferFrom(_lender, address(this), _debtAmount);
-        _debt.transfer(msg.sender, _debtAmount);
+        _debt.safeTransfer(msg.sender, _debtAmount);
         emit LoanCreated(loanCount, newLoan);
         return loanCount;
     }
 
-    function liquidateLoan(uint256 _loanId) external {
+    function liquidateLoan(uint256 _loanId) external returns (uint256) {
         Loan storage loan = loans[_loanId];
         require(
             loan.lender == msg.sender,
             "Coordinator: Only lender can liquidate"
         );
         if (
-            loan.duration + loan.startingTime <= block.timestamp ||
+            loan.duration + loan.startingTime > block.timestamp ||
             loan.duration == type(uint256).max
         ) {
             revert(
@@ -256,6 +256,7 @@ contract LoanCoordinator {
             try Borrower(loan.borrower).liquidationHook(loan) {} catch {}
         }
         emit LoanLiquidated(_loanId);
+        return auctions.length - 1;
     }
 
     function repayLoan(uint256 _loanId) external {
