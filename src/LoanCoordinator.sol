@@ -320,9 +320,7 @@ contract LoanCoordinator is NoDelegateCall {
             loan.duration + loan.startingTime <= block.timestamp ||
             loan.duration == type(uint256).max
         ) {
-            revert(
-                "Coordinator: Loan not yet liquidatable or is already in auction"
-            );
+            revert Coordinator_LoanNotLiquidatable();
         }
         uint256 interest = calculateInterest(
             loan.interestRate,
