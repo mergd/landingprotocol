@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.19;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
@@ -172,19 +172,29 @@ abstract contract Borrower is NoDelegateCall {
         uint256 lenderReturn,
         uint256 borrowerReturn
     ) external virtual;
+
+    /**
+     * @dev Flashloan callback
+     */
+    function executeOperation(
+        ERC20 _token,
+        uint256 _amount,
+        address _initiator,
+        bytes memory _params
+    ) external virtual returns (bool);
 }
 
 contract LoanCoordinator is NoDelegateCall {
     using SafeTransferLib for ERC20;
 
-    // State
+    //State
     uint256 public loanCount;
-    uint256[5] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
     Auction[] public auctions;
     Terms[] public loanTerms;
-    mapping(uint256 => uint256) public loanIdToAuction;
-    mapping(uint256 => Loan) public loans;
-    mapping(address => uint256[]) public borrowerLoans;
+    uint256[5] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
+    mapping(uint256 loanId => uint256 auctionId) public loanIdToAuction;
+    mapping(uint256 loanId => Loan loan) public loans;
+    mapping(address borrower => uint256[] loanIds) public borrowerLoans;
     // Lender loans should be tracked in lender contract
 
     // Errors
@@ -197,8 +207,14 @@ contract LoanCoordinator is NoDelegateCall {
     error Coordinator_LenderUpdateFailed();
     error Coordinator_AuctionEnded(uint256);
     error Coordinator_LoanNotSettled();
+    error Coordinator_FlashloanFailed();
 
-    // Events
+    constructor() {}
+
+    // ============================================================================================
+    // Functions: Lending
+    // ============================================================================================
+
     event LoanRepaid(
         uint256 indexed id,
         address indexed borrower,
@@ -206,20 +222,8 @@ contract LoanCoordinator is NoDelegateCall {
         uint256 amount
     );
     event LoanCreated(uint256 indexed id, Loan loan);
-
-    event AuctionCreated(Auction auction);
-    event AuctionSettled(
-        uint256 indexed auction,
-        address bidder,
-        uint256 price
-    );
-
     event RateRebalanced(uint256 indexed loanId, uint256 newRate);
-    event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
     event LoanLiquidated(uint256 indexed loanId);
-    event TermsSet(uint256 termId, Terms term);
-
-    constructor() {}
 
     function createLoan(
         address _lender,
@@ -395,8 +399,7 @@ contract LoanCoordinator is NoDelegateCall {
             loan.startingTime,
             block.timestamp
         );
-        uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtAmount = totalDebt;
+        loan.debtAmount = loan.debtAmount + interest; // Recalculate debt amount
         loan.startingTime = block.timestamp; // Reset starting time
         loan.interestRate = _newRate;
         // Borrower Hook
@@ -408,7 +411,16 @@ contract LoanCoordinator is NoDelegateCall {
         emit RateRebalanced(_loanId, _newRate);
     }
 
-    // AUCTION LOGIC
+    // ============================================================================================
+    // Functions: Auctions
+    // ============================================================================================
+    event AuctionCreated(Auction auction);
+    event AuctionSettled(
+        uint256 indexed auction,
+        address bidder,
+        uint256 price
+    );
+    event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
 
     function startAuction(
         uint256 _loanId,
@@ -532,7 +544,35 @@ contract LoanCoordinator is NoDelegateCall {
         }
     }
 
-    // MISC
+    // ============================================================================================
+    // Functions: Misc
+    // ============================================================================================
+    event TermsSet(uint256 termId, Terms term);
+    event Flashloan(address borrower, ERC20 token, uint256 amount);
+
+    function getFlashLoan(
+        address _borrower,
+        ERC20 _token,
+        uint256 _amount,
+        bytes memory _data
+    ) external noDelegateCall {
+        _token.safeTransfer(_borrower, _amount);
+
+        if (
+            !Borrower(_borrower).executeOperation(
+                _token,
+                _amount,
+                msg.sender,
+                _data
+            )
+        ) {
+            revert Coordinator_FlashloanFailed();
+        }
+
+        _token.safeTransferFrom(_borrower, address(this), _amount);
+        emit Flashloan(_borrower, _token, _amount);
+    }
+
     /**
      * @dev Set the terms of the loan
      * @param _terms the terms to set
@@ -556,7 +596,9 @@ contract LoanCoordinator is NoDelegateCall {
         }
     }
 
-    // VIEW FUNCTIONS
+    // ============================================================================================
+    // Functions: View
+    // ============================================================================================
 
     function getLoan(uint256 _loanId) external view returns (Loan memory loan) {
         loan = loans[_loanId];
