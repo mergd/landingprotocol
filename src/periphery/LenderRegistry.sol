@@ -42,6 +42,7 @@ contract LenderRegistry is Owned {
     /**
      * Optimize for the best interest rate, collateral, or borrow amount
      * @param _pair uint256 pair
+     * @param _callback Whether the lender can execute callbacks – somewhat trusted
      * @param _collateral Collateral Token
      * @param _debt Debt token
      * @param _collateralAmount Collateral provided - set at max to find the highest LTV
@@ -51,6 +52,7 @@ contract LenderRegistry is Owned {
      */
     function getLender(
         uint256 _pair,
+        bool _callback,
         address _collateral,
         address _debt,
         uint256 _collateralAmount,
@@ -69,6 +71,7 @@ contract LenderRegistry is Owned {
             0,
             msg.sender,
             address(0),
+            _callback,
             ERC20(_collateral),
             ERC20(_debt),
             _collateralAmount,
@@ -84,6 +87,7 @@ contract LenderRegistry is Owned {
                 0,
                 msg.sender,
                 address(0),
+                _callback,
                 ERC20(_collateral),
                 ERC20(_debt),
                 loan.collateralAmount,

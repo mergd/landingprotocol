@@ -21,18 +21,14 @@ struct Loan {
 
 struct Terms {
     uint256 liquidationBonus;
-    uint256 dutchAuctionMultiplier;
-    uint256 settlementMultiplier;
     uint256 auctionLength;
 }
 
 struct Auction {
-    uint256 id;
     uint256 loanId;
+    uint256 recoveryAmount;
     uint256 duration;
-    uint256 startingPrice;
-    uint256 startingTime;
-    uint256 endingPrice;
+    uint256 startTime;
 }
 
 uint256 constant SCALAR = 1e6;
@@ -113,7 +109,7 @@ abstract contract Lender is NoDelegateCall {
      * Called after loan is repaid
      * @param loan Loan struct
      * @param lenderReturn Amount returned to lender – at max this is principal + interest + penalty
-     * @param borrowerReturn Excess returned to borrower
+     * @param borrowerReturn Excess collateral returned to borrower
      */
     function auctionSettledHook(
         Loan memory loan,
@@ -165,7 +161,7 @@ abstract contract Borrower is NoDelegateCall {
      * @dev Called when the auction is settled
      * @param loan Loan struct
      * @param lenderReturn Amount returned to lender – at max this is principal + interest + penalty
-     * @param borrowerReturn Excess returned to borrower
+     * @param borrowerReturn Excess collateral returned to borrower
      */
     function auctionSettledHook(
         Loan memory loan,
@@ -276,6 +272,7 @@ contract LoanCoordinator is NoDelegateCall {
         bytes32 _data
     ) public noDelegateCall returns (uint256) {
         loanCount++;
+
         Loan memory newLoan = Loan(
             loanCount,
             _borrower,
@@ -316,13 +313,15 @@ contract LoanCoordinator is NoDelegateCall {
      */
     function liquidateLoan(uint256 _loanId) external {
         Loan storage loan = loans[_loanId];
+        Terms memory terms = loanTerms[loan.terms];
+
         if (loan.lender != msg.sender) {
             revert Coordinator_OnlyLender();
         }
 
         if (
             loan.duration + loan.startingTime <= block.timestamp ||
-            loan.duration == type(uint256).max
+            loan.duration == type(uint256).max // Auction in liquidation
         ) {
             revert Coordinator_LoanNotLiquidatable();
         }
@@ -332,26 +331,22 @@ contract LoanCoordinator is NoDelegateCall {
             loan.startingTime,
             block.timestamp
         );
-        uint256 totalDebt = loan.debtAmount + interest;
-        startAuction(_loanId, totalDebt, loan.terms);
+
+        uint256 totalDebt = ((loan.debtAmount + interest) *
+            terms.liquidationBonus) / SCALAR;
+        startAuction(_loanId, totalDebt, terms.auctionLength);
 
         loan.duration = type(uint256).max; // Auction off loan
 
         // Borrower Hook
-        if (isContract(loan.borrower)) {
-            try Borrower(loan.borrower).liquidationHook(loan) {} catch {}
-        }
+        if (isContract(loan.borrower))
+            loan.borrower.call(
+                abi.encodeWithSignature("liquidationHook(Loan)", loan)
+            );
         emit LoanLiquidated(_loanId);
     }
 
-    function repayLoan(uint256 _loanId) external {
-        repayLoan(_loanId, msg.sender);
-    }
-
-    function repayLoan(
-        uint256 _loanId,
-        address onBehalfof
-    ) public noDelegateCall {
+    function repayLoan(uint256 _loanId) public noDelegateCall {
         Loan memory loan = loans[_loanId];
         uint256 interest = calculateInterest(
             loan.interestRate,
@@ -360,7 +355,7 @@ contract LoanCoordinator is NoDelegateCall {
             block.timestamp
         );
         uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtToken.safeTransferFrom(onBehalfof, loan.lender, totalDebt);
+        loan.debtToken.safeTransferFrom(msg.sender, loan.lender, totalDebt);
 
         if (
             loan.callback &&
@@ -381,7 +376,6 @@ contract LoanCoordinator is NoDelegateCall {
      * @param _newRate the new rate
      */
     function rebalanceRate(uint256 _loanId, uint256 _newRate) external {
-        // Prevent lender hook from reverting
         Loan storage loan = loans[_loanId];
         if (loan.lender != msg.sender) {
             revert Coordinator_OnlyLender();
@@ -403,11 +397,15 @@ contract LoanCoordinator is NoDelegateCall {
         loan.startingTime = block.timestamp; // Reset starting time
         loan.interestRate = _newRate;
         // Borrower Hook
-        if (isContract(loan.borrower)) {
-            try
-                Borrower(loan.borrower).interestRateUpdateHook(loan, _newRate)
-            {} catch {}
-        }
+        if (isContract(loan.borrower))
+            loan.borrower.call(
+                abi.encodeWithSignature(
+                    "interestRateUpdateHook(Loan,uint256)",
+                    loan,
+                    _newRate
+                )
+            );
+
         emit RateRebalanced(_loanId, _newRate);
     }
 
@@ -425,97 +423,75 @@ contract LoanCoordinator is NoDelegateCall {
     function startAuction(
         uint256 _loanId,
         uint256 _amount,
-        uint256 _terms
+        uint256 _auctionLength
     ) internal {
-        Terms memory terms = loanTerms[_terms];
-        uint256 startPrice = (_amount * terms.dutchAuctionMultiplier) / SCALAR;
-        uint256 endPrice = _amount / (terms.settlementMultiplier * SCALAR);
         Auction memory newAuction = Auction(
-            auctions.length,
             _loanId,
-            terms.auctionLength,
-            startPrice,
-            block.timestamp,
-            endPrice
+            _amount,
+            _auctionLength,
+            block.timestamp
         );
         auctions.push(newAuction);
         emit AuctionCreated(newAuction);
     }
 
     /**
-     * @dev Settle the auction by putting a bid in
-     * @param _auctionId the auction to settle
+     *
      */
     function bid(uint256 _auctionId) external noDelegateCall {
         Auction memory auction = auctions[_auctionId];
         Loan memory loan = loans[auction.loanId];
-        Terms memory terms = loanTerms[loan.terms];
-        if (auction.startingTime + auction.duration <= block.timestamp) {
-            revert Coordinator_AuctionEnded(
-                auction.startingTime + auction.duration
-            );
-        }
-
-        uint256 currentPrice = getCurrentPrice(_auctionId);
-        loan.debtToken.safeTransferFrom(
-            msg.sender,
-            address(this),
-            currentPrice
+        (uint256 bidAmount, uint256 collateralAmt) = getCurrentPrice(
+            _auctionId
         );
-        loan.collateralToken.safeTransfer(msg.sender, loan.collateralAmount);
+        // Offer 100% of the debt to be repaid, but increase the amount of collateral offered
+        if (collateralAmt == 0 || bidAmount == 0)
+            revert Coordinator_AuctionEnded(_auctionId);
 
-        uint256 interest = calculateInterest(
-            loan.interestRate,
-            loan.debtAmount,
-            loan.startingTime,
-            block.timestamp
-        );
-        uint256 _lenderClearing = ((loan.debtAmount + interest) *
-            terms.liquidationBonus) / SCALAR;
-
-        uint256 lenderReturn = (_lenderClearing > currentPrice)
-            ? currentPrice
-            : _lenderClearing;
-        uint256 borrowerReturn = currentPrice - lenderReturn;
-
-        deleteLoan(auction.loanId, loan.borrower);
-
-        loan.debtToken.safeTransfer(loan.lender, lenderReturn);
+        uint256 borrowerReturn = loan.collateralAmount - collateralAmt;
 
         if (
             loan.callback &&
             Lender(loan.lender).auctionSettledHook(
                 loan,
-                lenderReturn,
+                bidAmount,
                 borrowerReturn
             ) !=
             Lender.auctionSettledHook.selector
-        ) {
-            revert Coordinator_LenderUpdateFailed();
-        }
-        if (isContract(loan.borrower)) // Borrower Hook
-        {
-            try
-                Borrower(loan.borrower).auctionSettledHook(
+        ) revert Coordinator_LenderUpdateFailed();
+
+        if (isContract(loan.borrower))
+            loan.borrower.call(
+                abi.encodeWithSignature(
+                    "auctionSettledHook(Loan,uint256,uint256)",
                     loan,
-                    lenderReturn,
+                    bidAmount,
                     borrowerReturn
                 )
-            {} catch {}
-        }
+            );
+
+        // Delete the loan
+        delete auctions[_auctionId];
+        delete loanIdToAuction[auction.loanId];
+        deleteLoan(auction.loanId, loan.borrower);
+
+        loan.debtToken.safeTransferFrom(msg.sender, address(this), bidAmount);
+        loan.collateralToken.safeTransfer(msg.sender, collateralAmt);
+        loan.debtToken.safeTransfer(loan.lender, bidAmount);
         if (borrowerReturn > 0) {
             loan.debtToken.safeTransfer(loan.borrower, borrowerReturn);
         }
-        emit AuctionSettled(_auctionId, msg.sender, currentPrice);
+
+        emit AuctionSettled(_auctionId, msg.sender, bidAmount);
     }
 
     /**
      * @dev Lender can reclaim the collateral if the auction doesn't clear reserve price
      * @param _auctionId the auction to reclaim
      */
-    function reclaim(uint256 _auctionId) external {
+    function reclaim(uint256 _auctionId) public {
         Auction memory auction = auctions[_auctionId];
-        if (auction.startingTime + auction.duration >= block.timestamp) {
+        if (auction.startTime + auction.duration >= block.timestamp) {
             revert Coordinator_AuctionNotEnded();
         }
 
@@ -529,18 +505,36 @@ contract LoanCoordinator is NoDelegateCall {
         emit AuctionReclaimed(_auctionId, loan.collateralAmount);
     }
 
-    function getCurrentPrice(uint256 _auctionId) public view returns (uint256) {
+    function getCurrentPrice(
+        uint256 _auctionId
+    ) public view returns (uint256 bidAmount, uint256 collateral) {
         Auction memory auction = auctions[_auctionId];
-        uint256 startPrice = auction.startingPrice;
-        uint256 endPrice = auction.endingPrice;
-        uint256 startTime = auction.startingTime;
-        uint256 duration = auction.duration;
-        if (block.timestamp >= startTime + duration) {
-            return endPrice;
+        Loan memory loan = loans[auction.loanId];
+        if (auction.loanId == 0) {
+            revert("Auction doesn't exist");
+        }
+        uint256 timeElapsed = auction.startTime +
+            auction.duration -
+            block.timestamp;
+        uint256 midPoint = auction.duration / 2;
+        // Offer 100% of the debt to be repaid, but increase the amount of collateral offered
+        if (auction.startTime + midPoint > block.timestamp) {
+            bidAmount = auction.recoveryAmount;
+            collateral = (timeElapsed * loan.collateralAmount) / midPoint;
+        } else if (
+            auction.startTime + midPoint < block.timestamp &&
+            timeElapsed < auction.duration
+        ) {
+            // Offer all the collateral, but reduce the amount of debt to be offered
+            collateral = loan.collateralAmount;
+            bidAmount =
+                auction.recoveryAmount -
+                (timeElapsed * auction.recoveryAmount) /
+                midPoint;
         } else {
-            uint256 elapsed = block.timestamp - startTime;
-            uint256 remaining = duration - elapsed;
-            return startPrice - ((startPrice - endPrice) * elapsed) / remaining;
+            // Auction lapsed
+            bidAmount = 0;
+            collateral = 0;
         }
     }
 
