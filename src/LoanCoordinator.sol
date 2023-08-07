@@ -49,13 +49,16 @@ abstract contract NoDelegateCall {
 
 abstract contract Lender is NoDelegateCall {
     // Callback contracts can prevent repayments and bidding, so it's somewhat trusted
-    constructor(LoanCoordinator _coordinator, bool _callback) NoDelegateCall() {
+    constructor(
+        ILoanCoordinator _coordinator,
+        bool _callback
+    ) NoDelegateCall() {
         coordinator = _coordinator;
         callback = _callback;
     }
 
     bool public immutable callback; // False - No callbacks, True - Allow callbacks
-    LoanCoordinator public immutable coordinator;
+    ILoanCoordinator public immutable coordinator;
 
     /**
      * Verify the loans - should be noDelegateCall
@@ -111,11 +114,11 @@ abstract contract Lender is NoDelegateCall {
 
 /// @dev Optional interface for borrowers to implement
 abstract contract Borrower is NoDelegateCall {
-    constructor(LoanCoordinator _coordinator) {
+    constructor(ILoanCoordinator _coordinator) {
         coordinator = _coordinator;
     }
 
-    LoanCoordinator public immutable coordinator;
+    ILoanCoordinator public immutable coordinator;
 
     /**
      * @dev Called when loan is liquidated
@@ -348,7 +351,10 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
         if (loan.lender != msg.sender) {
             revert Coordinator_OnlyLender();
         }
-        if (loan.duration + loan.startingTime > block.timestamp) {
+        if (
+            loan.duration == type(uint256).max || // Loan is in liquidation
+            loan.duration + loan.startingTime > block.timestamp
+        ) {
             revert Coordinator_LoanNotLiquidatable();
         }
         // Add a check to prevent rate from being too high – maximum rate is 200% APY
@@ -553,16 +559,26 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
     // Functions: View
     // ============================================================================================
 
-    function getLoan(uint256 _loanId) external view returns (Loan memory loan) {
+    function getLoan(
+        uint256 _loanId,
+        bool _interest
+    ) external view returns (Loan memory loan) {
         loan = loans[_loanId];
 
         // Account for pending interest for this loan
-        loan.debtAmount += calculateInterest(
-            loan.interestRate,
-            loan.debtAmount,
-            loan.startingTime,
-            block.timestamp
-        );
+        if (_interest)
+            loan.debtAmount += calculateInterest(
+                loan.interestRate,
+                loan.debtAmount,
+                loan.startingTime,
+                block.timestamp
+            );
+    }
+
+    function getAuction(
+        uint256 _auctionId
+    ) external view returns (Auction memory auction) {
+        auction = auctions[_auctionId];
     }
 
     function isContract(address _addr) private view returns (bool) {

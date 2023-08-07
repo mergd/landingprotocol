@@ -30,6 +30,16 @@ interface ILoanCoordinator {
     }
 
     /** STATE  */
+    function loanCount() external view returns (uint256);
+
+    function durations(uint256 index) external view returns (uint256);
+
+    function loanIdToAuction(uint256 loanId) external view returns (uint256);
+
+    function borrowerLoans(
+        address borrower,
+        uint256 index
+    ) external view returns (uint256);
 
     /** EVENTS */
     event LoanRepaid(
@@ -92,5 +102,12 @@ interface ILoanCoordinator {
 
     function setTerms(Term memory _terms) external returns (uint256);
 
-    function getLoan(uint256 _loanId) external view returns (Loan memory loan);
+    function getLoan(
+        uint256 _loanId,
+        bool _interest
+    ) external view returns (Loan memory loan);
+
+    function getAuction(
+        uint256 _auctionId
+    ) external view returns (Auction memory auction);
 }
