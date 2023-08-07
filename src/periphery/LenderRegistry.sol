@@ -59,7 +59,7 @@ contract LenderRegistry is Owned {
         uint256 _debtAmount,
         uint256 _duration,
         uint256 _interest
-    ) public view returns (Loan memory loan) {
+    ) public view returns (ILoanCoordinator.Loan memory loan) {
         bytes32 key = keccak256(abi.encodePacked(_pair, _collateral, _debt));
         Lender[] memory lenderList = lenders[key];
         loan.debtAmount = _debtAmount;
@@ -67,7 +67,7 @@ contract LenderRegistry is Owned {
         loan.interestRate = _interest;
         loan.lender = address(0);
 
-        loan = Loan(
+        loan = ILoanCoordinator.Loan(
             0,
             msg.sender,
             address(0),
@@ -83,7 +83,7 @@ contract LenderRegistry is Owned {
         );
 
         for (uint256 i = 0; i < lenderList.length; i++) {
-            Loan memory _loan = Loan(
+            ILoanCoordinator.Loan memory _loan = ILoanCoordinator.Loan(
                 0,
                 msg.sender,
                 address(0),

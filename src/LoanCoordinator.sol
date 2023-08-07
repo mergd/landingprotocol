@@ -3,33 +3,7 @@ pragma solidity ^0.8.19;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
-
-struct Loan {
-    uint256 id;
-    address borrower;
-    address lender;
-    bool callback;
-    ERC20 collateralToken;
-    ERC20 debtToken;
-    uint256 collateralAmount;
-    uint256 debtAmount;
-    uint256 interestRate;
-    uint256 startingTime;
-    uint256 duration;
-    uint256 terms;
-}
-
-struct Terms {
-    uint256 liquidationBonus;
-    uint256 auctionLength;
-}
-
-struct Auction {
-    uint256 loanId;
-    uint256 recoveryAmount;
-    uint256 duration;
-    uint256 startTime;
-}
+import "./ILoanCoordinator.sol";
 
 uint256 constant SCALAR = 1e6;
 
@@ -90,7 +64,7 @@ abstract contract Lender is NoDelegateCall {
      * @param data Any additional identifying data
      */
     function verifyLoan(
-        Loan memory loan,
+        ILoanCoordinator.Loan memory loan,
         bytes32 data
     ) external virtual returns (bool);
 
@@ -101,7 +75,7 @@ abstract contract Lender is NoDelegateCall {
      * @param data Any additional identifying data
      */
     function viewVerifyLoan(
-        Loan memory loan,
+        ILoanCoordinator.Loan memory loan,
         bytes32 data
     ) public view virtual returns (bool);
 
@@ -112,12 +86,14 @@ abstract contract Lender is NoDelegateCall {
      * @param borrowerReturn Excess collateral returned to borrower
      */
     function auctionSettledHook(
-        Loan memory loan,
+        ILoanCoordinator.Loan memory loan,
         uint256 lenderReturn,
         uint256 borrowerReturn
     ) external virtual returns (bytes4) {}
 
-    function loanRepaidHook(Loan memory loan) external virtual returns (bytes4);
+    function loanRepaidHook(
+        ILoanCoordinator.Loan memory loan
+    ) external virtual returns (bytes4);
 
     /**
      * @dev Could be optimized
@@ -129,7 +105,7 @@ abstract contract Lender is NoDelegateCall {
      * @return _collateral Provide the amount of collateral required
      */
     function getQuote(
-        Loan memory loan
+        ILoanCoordinator.Loan memory loan
     ) external view virtual returns (uint256, uint256, uint256);
 }
 
@@ -145,7 +121,9 @@ abstract contract Borrower is NoDelegateCall {
      * @dev Called when loan is liquidated
      * @param loan Loan struct
      */
-    function liquidationHook(Loan memory loan) external virtual;
+    function liquidationHook(
+        ILoanCoordinator.Loan memory loan
+    ) external virtual;
 
     /**
      * @dev Called when the interest rate is rebalanced
@@ -153,7 +131,7 @@ abstract contract Borrower is NoDelegateCall {
      * @param newRate New interest rate
      */
     function interestRateUpdateHook(
-        Loan memory loan,
+        ILoanCoordinator.Loan memory loan,
         uint256 newRate
     ) external virtual;
 
@@ -164,7 +142,7 @@ abstract contract Borrower is NoDelegateCall {
      * @param borrowerReturn Excess collateral returned to borrower
      */
     function auctionSettledHook(
-        Loan memory loan,
+        ILoanCoordinator.Loan memory loan,
         uint256 lenderReturn,
         uint256 borrowerReturn
     ) external virtual;
@@ -180,13 +158,13 @@ abstract contract Borrower is NoDelegateCall {
     ) external virtual returns (bool);
 }
 
-contract LoanCoordinator is NoDelegateCall {
+contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
     using SafeTransferLib for ERC20;
 
     //State
     uint256 public loanCount;
     Auction[] public auctions;
-    Terms[] public loanTerms;
+    Term[] public loanTerms;
     uint256[5] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
     mapping(uint256 loanId => uint256 auctionId) public loanIdToAuction;
     mapping(uint256 loanId => Loan loan) public loans;
@@ -210,16 +188,6 @@ contract LoanCoordinator is NoDelegateCall {
     // ============================================================================================
     // Functions: Lending
     // ============================================================================================
-
-    event LoanRepaid(
-        uint256 indexed id,
-        address indexed borrower,
-        address indexed lender,
-        uint256 amount
-    );
-    event LoanCreated(uint256 indexed id, Loan loan);
-    event RateRebalanced(uint256 indexed loanId, uint256 newRate);
-    event LoanLiquidated(uint256 indexed loanId);
 
     function createLoan(
         address _lender,
@@ -313,7 +281,7 @@ contract LoanCoordinator is NoDelegateCall {
      */
     function liquidateLoan(uint256 _loanId) external {
         Loan storage loan = loans[_loanId];
-        Terms memory terms = loanTerms[loan.terms];
+        Term memory terms = loanTerms[loan.terms];
 
         if (loan.lender != msg.sender) {
             revert Coordinator_OnlyLender();
@@ -412,13 +380,6 @@ contract LoanCoordinator is NoDelegateCall {
     // ============================================================================================
     // Functions: Auctions
     // ============================================================================================
-    event AuctionCreated(Auction auction);
-    event AuctionSettled(
-        uint256 indexed auction,
-        address bidder,
-        uint256 price
-    );
-    event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
 
     function startAuction(
         uint256 _loanId,
@@ -541,8 +502,6 @@ contract LoanCoordinator is NoDelegateCall {
     // ============================================================================================
     // Functions: Misc
     // ============================================================================================
-    event TermsSet(uint256 termId, Terms term);
-    event Flashloan(address borrower, ERC20 token, uint256 amount);
 
     function getFlashLoan(
         address _borrower,
@@ -571,7 +530,7 @@ contract LoanCoordinator is NoDelegateCall {
      * @dev Set the terms of the loan
      * @param _terms the terms to set
      */
-    function setTerms(Terms memory _terms) external returns (uint256) {
+    function setTerms(Term memory _terms) external returns (uint256) {
         loanTerms.push(_terms);
         emit TermsSet(loanTerms.length - 1, _terms);
         return loanTerms.length - 1;

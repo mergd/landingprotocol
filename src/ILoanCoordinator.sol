@@ -6,6 +6,7 @@ interface ILoanCoordinator {
         uint256 id;
         address borrower;
         address lender;
+        bool callback;
         ERC20 collateralToken;
         ERC20 debtToken;
         uint256 collateralAmount;
@@ -16,38 +17,19 @@ interface ILoanCoordinator {
         uint256 terms;
     }
 
-    struct Terms {
+    struct Term {
         uint256 liquidationBonus;
-        uint256 dutchAuctionMultiplier;
-        uint256 settlementMultiplier;
         uint256 auctionLength;
     }
 
     struct Auction {
-        uint256 id;
         uint256 loanId;
+        uint256 recoveryAmount;
         uint256 duration;
-        uint256 startingPrice;
-        uint256 startingTime;
-        uint256 endingPrice;
+        uint256 startTime;
     }
 
     /** STATE  */
-    function loanCount() external view returns (uint256);
-
-    function durations(uint256 index) external view returns (uint256);
-
-    function auctions(uint256 index) external view returns (Auction memory);
-
-    function loanTerms(uint256 index) external view returns (Terms memory);
-
-    function loanIdToAuction(uint256 index) external view returns (uint256);
-
-    function loans(uint256 index) external view returns (Loan memory);
-
-    function borrowerLoans(
-        address account
-    ) external view returns (uint256[] memory);
 
     /** EVENTS */
     event LoanRepaid(
@@ -66,7 +48,8 @@ interface ILoanCoordinator {
     event RateRebalanced(uint256 indexed loanId, uint256 newRate);
     event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
     event LoanLiquidated(uint256 indexed loanId);
-    event TermsSet(uint256 termId, Terms term);
+    event TermsSet(uint256 termId, Term term);
+    event Flashloan(address borrower, ERC20 token, uint256 amount);
 
     /** CONTRACT FUNCTIONS */
     function createLoan(
@@ -97,8 +80,6 @@ interface ILoanCoordinator {
 
     function repayLoan(uint256 _loanId) external;
 
-    function repayLoan(uint256 _loanId, address onBehalfof) external;
-
     function rebalanceRate(uint256 _loanId, uint256 _newRate) external;
 
     function bid(uint256 _auctionId) external;
@@ -107,9 +88,9 @@ interface ILoanCoordinator {
 
     function getCurrentPrice(
         uint256 _auctionId
-    ) external view returns (uint256);
+    ) external view returns (uint256 bidAmount, uint256 collateral);
 
-    function setTerms(Terms memory _terms) external returns (uint256);
+    function setTerms(Term memory _terms) external returns (uint256);
 
     function getLoan(uint256 _loanId) external view returns (Loan memory loan);
 }
