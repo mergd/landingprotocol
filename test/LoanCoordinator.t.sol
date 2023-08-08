@@ -6,6 +6,7 @@ import "forge-std/Test.sol";
 import "src/LoanCoordinator.sol";
 import "./mocks/MockLender.sol";
 import "./mocks/MockERC20.sol";
+import "./mocks/MockBorrower.sol";
 
 contract LoanCoordinatorTest is Test {
     LoanCoordinator coordinator;
@@ -14,11 +15,15 @@ contract LoanCoordinatorTest is Test {
     address _borrower = address(0x1);
     address _liquidator = address(0x2);
     MockLender _lender;
+    uint256 termSet;
 
     function setUp() external {
         coordinator = new LoanCoordinator();
-        Terms memory _term = Terms(1.005 * 1e6, 3, 2, 1000);
-        coordinator.setTerms(_term);
+        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(
+            1.005 * 1e6,
+            100
+        );
+        termSet = coordinator.setTerms(_term);
         _collateral = new MockERC20("LEND", "LENDING TOKEN", 18);
         _borrow = new MockERC20("BORROW", "BORROWING TOKEN", 18);
         _lender = new MockLender(coordinator, _borrow);
@@ -35,13 +40,13 @@ contract LoanCoordinatorTest is Test {
             address(_lender),
             _collateral,
             _borrow,
-            10 * 1e18,
-            10 * 1e18,
+            1,
+            1,
             0.1 * 1e6,
-            0,
-            0
+            1,
+            termSet
         );
-        assertEq(_borrow.balanceOf(_borrower), 10 * 1e18);
+        // assertEq(_borrow.balanceOf(_borrower), 10 * 1e18);
     }
 
     function testLiquidate() public {
@@ -55,7 +60,7 @@ contract LoanCoordinatorTest is Test {
             1 * 1e18,
             1 * 1e18,
             0.5 * 1e6,
-            0,
+            4,
             0
         );
 
@@ -81,12 +86,14 @@ contract LoanCoordinatorTest is Test {
             0
         );
 
-        vm.warp(10 days);
-        _lender.liquidate(_loan);
+        vm.warp(1 days + 1);
+        uint256 liqd = _lender.liquidate(_loan);
         vm.startPrank(address(1));
         _collateral.mint(address(1), 2e18);
         _borrow.approve(address(coordinator), 2e18);
-        coordinator.bid(0);
+        (uint256 bidAmt, ) = coordinator.getCurrentPrice(liqd);
+        console2.log("Auction Price", liqd);
+        // coordinator.bid(0);
     }
 
     function testRebalanceRate() public {

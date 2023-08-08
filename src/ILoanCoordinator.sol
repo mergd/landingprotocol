@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 
 interface ILoanCoordinator {
@@ -86,7 +87,7 @@ interface ILoanCoordinator {
         bytes32 _data
     ) external returns (uint256);
 
-    function liquidateLoan(uint256 _loanId) external;
+    function liquidateLoan(uint256 _loanId) external returns (uint256);
 
     function repayLoan(uint256 _loanId) external;
 

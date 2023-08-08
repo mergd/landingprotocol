@@ -7,27 +7,33 @@ contract MockLender is Lender {
     constructor(
         LoanCoordinator _coordinator,
         ERC20 _debt
-    ) Lender(_coordinator) {
+    ) Lender(_coordinator, true) {
         _debt.approve(address(coordinator), type(uint256).max);
     }
 
     function verifyLoan(
-        Loan memory loan,
-        bytes32 data
-    ) external override returns (bool) {
+        ILoanCoordinator.Loan memory,
+        bytes32
+    ) external pure override returns (bool) {
         return true;
     }
 
     function auctionSettledHook(
-        Loan memory loan,
-        uint256 lenderReturn,
-        uint256 borrowerReturn
-    ) external override {}
+        ILoanCoordinator.Loan memory,
+        uint256,
+        uint256
+    ) external pure override returns (bytes4) {
+        return Lender.auctionSettledHook.selector;
+    }
 
-    function loanRepaidHook(Loan memory loan) external override {}
+    function loanRepaidHook(
+        ILoanCoordinator.Loan memory
+    ) external pure override returns (bytes4) {
+        return Lender.loanRepaidHook.selector;
+    }
 
-    function liquidate(uint256 loan) external {
-        coordinator.liquidateLoan(loan);
+    function liquidate(uint256 loan) external returns (uint256) {
+        return coordinator.liquidateLoan(loan);
     }
 
     function rebalanceRate(uint256 loan, uint256 newRate) external {
@@ -35,8 +41,15 @@ contract MockLender is Lender {
     }
 
     function getQuote(
-        Loan memory
+        ILoanCoordinator.Loan memory
     ) external pure override returns (uint256, uint256, uint256) {
         return (0, 0, 0);
+    }
+
+    function viewVerifyLoan(
+        ILoanCoordinator.Loan memory loan,
+        bytes32 data
+    ) public view virtual override returns (bool) {
+        return true;
     }
 }

@@ -6,7 +6,6 @@ import "forge-std/Script.sol";
 import "src/LoanCoordinator.sol";
 
 import "src/periphery/LenderRegistry.sol";
-import "src/periphery/YieldLooping.sol";
 
 import "test/mocks/MockERC20.sol";
 
@@ -42,16 +41,6 @@ contract Deploy is Script {
             "Deployed Collateral Token at address: ",
             address(collateralToken)
         );
-
-        YieldLooping looper = new YieldLooping(
-            0.70 * 1e6, // 70%
-            0.03 * 1e6, // 3%
-            0.01 * 1e6, // 1%
-            debtToken,
-            loanCoordinator
-        );
-
-        console2.log("Deployed YieldLooping at address: ", address(looper));
 
         vm.stopBroadcast();
     }

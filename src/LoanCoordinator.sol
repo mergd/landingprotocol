@@ -262,7 +262,7 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
         loans[loanCount] = newLoan;
 
         // Lender Hook to verify loan details
-        if (Lender(_lender).verifyLoan(newLoan, _data)) {
+        if (!Lender(_lender).verifyLoan(newLoan, _data)) {
             revert Coordinator_LoanNotVerified();
         }
         _collateral.safeTransferFrom(
@@ -281,8 +281,9 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
     /**
      * @dev Initiate a dutch auction to liquidate the laon
      * @param _loanId the loan to liquidate
+     * @return the auction id
      */
-    function liquidateLoan(uint256 _loanId) external {
+    function liquidateLoan(uint256 _loanId) external returns (uint256) {
         Loan storage loan = loans[_loanId];
         Term memory terms = loanTerms[loan.terms];
 
@@ -291,7 +292,7 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
         }
 
         if (
-            loan.duration + loan.startingTime <= block.timestamp ||
+            loan.duration + loan.startingTime > block.timestamp ||
             loan.duration == type(uint256).max // Auction in liquidation
         ) {
             revert Coordinator_LoanNotLiquidatable();
@@ -314,7 +315,9 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
             loan.borrower.call(
                 abi.encodeWithSignature("liquidationHook(Loan)", loan)
             );
+
         emit LoanLiquidated(_loanId);
+        return auctions.length - 1;
     }
 
     function repayLoan(uint256 _loanId) public noDelegateCall {
@@ -480,9 +483,8 @@ contract LoanCoordinator is NoDelegateCall, ILoanCoordinator {
         if (auction.loanId == 0) {
             revert("Auction doesn't exist");
         }
-        uint256 timeElapsed = auction.startTime +
-            auction.duration -
-            block.timestamp;
+        // todo this can revert if auction hasn't been touched
+        uint256 timeElapsed = block.timestamp - auction.startTime;
         uint256 midPoint = auction.duration / 2;
         // Offer 100% of the debt to be repaid, but increase the amount of collateral offered
         if (auction.startTime + midPoint > block.timestamp) {
