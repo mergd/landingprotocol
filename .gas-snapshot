@@ -1,3 +1,4 @@
-LoanCoordinatorTest:testLend() (gas: 487429)
-LoanCoordinatorTest:testLiquidate() (gas: 640246)
-LoanCoordinatorTest:testRebalanceRate() (gas: 491756)
+LoanCoordinatorTest:testBid() (gas: 652735)
+LoanCoordinatorTest:testLend() (gas: 494401)
+LoanCoordinatorTest:testLiquidate() (gas: 616944)
+LoanCoordinatorTest:testRebalanceRate() (gas: 498291)

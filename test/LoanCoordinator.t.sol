@@ -12,18 +12,22 @@ contract LoanCoordinatorTest is Test {
     LoanCoordinator coordinator;
     MockERC20 _collateral;
     MockERC20 _borrow;
-    address _borrower = address(0x1);
+    address _borrower;
     address _liquidator = address(0x2);
     MockLender _lender;
     uint256 termSet;
 
     function setUp() external {
         coordinator = new LoanCoordinator();
-        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(1.005 * 1e6, 100);
+        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(
+            1.005 * 1e6, // Liquidation bonus
+            100 // Auction duration
+        );
         termSet = coordinator.setTerms(_term);
         _collateral = new MockERC20("LEND", "LENDING TOKEN", 18);
         _borrow = new MockERC20("BORROW", "BORROWING TOKEN", 18);
         _lender = new MockLender(coordinator, _borrow);
+        _borrower = address(new MockBorrower(coordinator));
         _collateral.mint(address(this), 1000 * 1e18);
     }
 
@@ -33,53 +37,192 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(_borrower, 1000 * 1e18);
 
         vm.startPrank(_borrower);
-        coordinator.createLoan(address(_lender), _collateral, _borrow, 1, 1, 0.1 * 1e6, 1, termSet);
+        coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1,
+            1,
+            0.1 * 1e6,
+            1,
+            termSet
+        );
         // assertEq(_borrow.balanceOf(_borrower), 10 * 1e18);
+    }
+
+    function testReclaim() public {
+        _borrow.mint(address(_lender), 1000e18);
+        collateralmintAndApprove(_borrower, 1000 * 1e18);
+        vm.startPrank(_borrower);
+        uint256 loanId = coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            4,
+            0
+        );
+
+        vm.warp(8 hours + 1);
+
+        _lender.liquidate(1);
+
+        vm.warp(8 hours + 102);
+        coordinator.reclaim(0);
     }
 
     function testLiquidate() public {
         _borrow.mint(address(_lender), 1000e18);
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
-        coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 4, 0);
+        coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            4,
+            0
+        );
 
         vm.warp(8 hours + 1);
-        // _lender.liquidate(0);
-        // vm.expectRevert();
-
         _lender.liquidate(1);
     }
 
-    function testBid() public {
+    // Test when the a descending amount of collateral is offered
+    function testBid1() public {
         _borrow.mint(address(_lender), 1000e18);
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
-        uint256 _loan =
-            coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 1, 0);
+        uint256 _loan = coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            1,
+            0
+        );
 
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
+        vm.warp(1 days + 2);
+        (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(
+            liqd
+        );
+        // assertGt(bidAmt, 1e18);
+        // assertLt(collateralAmt, 1e18);
+        console2.log("Auction Price", bidAmt);
+        borrowMintAndApprove(address(1), bidAmt);
+
         vm.startPrank(address(1));
-        _collateral.mint(address(1), 2e18);
-        _borrow.approve(address(coordinator), 2e18);
-        (uint256 bidAmt,) = coordinator.getCurrentPrice(liqd);
-        console2.log("Auction Price", liqd);
-        // coordinator.bid(0);
+        coordinator.bid(0);
+    }
+
+    // Test when a descending amount of principal is offered
+    function testBid2() public {
+        _borrow.mint(address(_lender), 1000e18);
+        collateralmintAndApprove(_borrower, 1000 * 1e18);
+        vm.startPrank(_borrower);
+        uint256 _loan = coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            1,
+            0
+        );
+
+        vm.warp(1 days + 1);
+        uint256 liqd = _lender.liquidate(_loan);
+        vm.warp(1 days + 5);
+        (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(
+            liqd
+        );
+        assertLt(1e18, bidAmt);
+        // assertEq(collateralAmt, 1e18);
+        borrowMintAndApprove(address(1), bidAmt);
+
+        console2.log("Auction Price", bidAmt);
+        console2.log("Coll amt Price", collateralAmt);
+        vm.startPrank(address(1));
+        coordinator.bid(0);
     }
 
     function testRebalanceRate() public {
         _borrow.mint(address(_lender), 1000e18);
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
-        coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 0, 0);
+        coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            0,
+            0
+        );
 
         vm.warp(8 hours + 1);
         _lender.rebalanceRate(1, 0.2 * 1e6);
     }
 
-    function collateralmintAndApprove(address receipient, uint256 amount) public {
+    function testRepay() public {
+        _borrow.mint(address(_lender), 1000e18);
+        collateralmintAndApprove(_borrower, 1000 * 1e18);
+        vm.startPrank(_borrower);
+        coordinator.createLoan(
+            address(_lender),
+            _collateral,
+            _borrow,
+            1 * 1e18,
+            1 * 1e18,
+            0.5 * 1e6,
+            0,
+            0
+        );
+
+        borrowMintAndApprove(_borrower, 1.01 * 1e18);
+        vm.startPrank(_borrower);
+        coordinator.repayLoan(1);
+    }
+
+    // function testFlashLoan() public {
+    //     _borrow.mint(address(_lender), 1000e18);
+    //     collateralmintAndApprove(_borrower, 1000 * 1e18);
+    //     vm.startPrank(_borrower);
+    //     coordinator.createLoan(
+    //         address(_lender),
+    //         _collateral,
+    //         _borrow,
+    //         1 * 1e18,
+    //         1 * 1e18,
+    //         0.5 * 1e6,
+    //         0,
+    //         0
+    //     );
+    //     MockBorrower(_borrower).getFlashloan(true, _borrow);
+    // }
+
+    function collateralmintAndApprove(
+        address receipient,
+        uint256 amount
+    ) public {
         _collateral.mint(receipient, amount);
         vm.prank(receipient);
         _collateral.approve(address(coordinator), amount);
+    }
+
+    function borrowMintAndApprove(address receipient, uint256 amount) public {
+        _borrow.mint(receipient, amount);
+        vm.prank(receipient);
+        _borrow.approve(address(coordinator), amount);
     }
 }
