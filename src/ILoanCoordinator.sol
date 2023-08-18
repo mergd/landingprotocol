@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
+
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 
 interface ILoanCoordinator {
@@ -30,39 +31,33 @@ interface ILoanCoordinator {
         uint256 startTime;
     }
 
-    /** STATE  */
+    /**
+     * STATE
+     */
     function loanCount() external view returns (uint256);
 
     function durations(uint256 index) external view returns (uint256);
 
     function loanIdToAuction(uint256 loanId) external view returns (uint256);
 
-    function borrowerLoans(
-        address borrower,
-        uint256 index
-    ) external view returns (uint256);
+    function borrowerLoans(address borrower, uint256 index) external view returns (uint256);
 
-    /** EVENTS */
-    event LoanRepaid(
-        uint256 indexed id,
-        address indexed borrower,
-        address indexed lender,
-        uint256 amount
-    );
+    /**
+     * EVENTS
+     */
+    event LoanRepaid(uint256 indexed id, address indexed borrower, address indexed lender, uint256 amount);
     event LoanCreated(uint256 indexed id, Loan loan);
     event AuctionCreated(Auction auction);
-    event AuctionSettled(
-        uint256 indexed auction,
-        address bidder,
-        uint256 price
-    );
+    event AuctionSettled(uint256 indexed auction, address bidder, uint256 price);
     event RateRebalanced(uint256 indexed loanId, uint256 newRate);
     event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
     event LoanLiquidated(uint256 indexed loanId);
     event TermsSet(uint256 termId, Term term);
     event Flashloan(address borrower, ERC20 token, uint256 amount);
 
-    /** CONTRACT FUNCTIONS */
+    /**
+     * CONTRACT FUNCTIONS
+     */
     function createLoan(
         address _lender,
         ERC20 _collateral,
@@ -97,18 +92,11 @@ interface ILoanCoordinator {
 
     function reclaim(uint256 _auctionId) external;
 
-    function getCurrentPrice(
-        uint256 _auctionId
-    ) external view returns (uint256 bidAmount, uint256 collateral);
+    function getCurrentPrice(uint256 _auctionId) external view returns (uint256 bidAmount, uint256 collateral);
 
     function setTerms(Term memory _terms) external returns (uint256);
 
-    function getLoan(
-        uint256 _loanId,
-        bool _interest
-    ) external view returns (Loan memory loan);
+    function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory loan);
 
-    function getAuction(
-        uint256 _auctionId
-    ) external view returns (Auction memory auction);
+    function getAuction(uint256 _auctionId) external view returns (Auction memory auction);
 }

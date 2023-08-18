@@ -14,19 +14,13 @@ contract Deploy is Script {
     function run() external returns (LoanCoordinator loanCoordinator) {
         vm.startBroadcast();
         loanCoordinator = new LoanCoordinator();
-        console2.log(
-            "Deployed LoanCoordinator at address: ",
-            address(loanCoordinator)
-        );
+        console2.log("Deployed LoanCoordinator at address: ", address(loanCoordinator));
 
         LenderRegistry lenderRegistry = new LenderRegistry(
             loanCoordinator,
             address(this)
         );
-        console2.log(
-            "Deployed Lender Registry at address: ",
-            address(lenderRegistry)
-        );
+        console2.log("Deployed Lender Registry at address: ", address(lenderRegistry));
 
         MockERC20 debtToken = new MockERC20("Debt Token", "DEBT", 18);
         console2.log("Deployed Debt Token at address: ", address(debtToken));
@@ -37,10 +31,7 @@ contract Deploy is Script {
             18
         );
 
-        console2.log(
-            "Deployed Collateral Token at address: ",
-            address(collateralToken)
-        );
+        console2.log("Deployed Collateral Token at address: ", address(collateralToken));
 
         vm.stopBroadcast();
     }

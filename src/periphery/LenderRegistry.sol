@@ -14,23 +14,15 @@ contract LenderRegistry is Owned {
         loanCoordinator = _coordinator;
     }
 
-    function addLender(
-        uint256 _pair,
-        address _collateral,
-        address _debt,
-        Lender _lender
-    ) public onlyOwner {
+    function addLender(uint256 _pair, address _collateral, address _debt, Lender _lender) public onlyOwner {
         bytes32 key = keccak256(abi.encodePacked(_pair, _collateral, _debt));
         lenders[key].push(_lender);
     }
 
-    function removeLender(
-        uint256 _pair,
-        address _collateral,
-        address _debt,
-        Lender _lender,
-        uint256 _id
-    ) public onlyOwner {
+    function removeLender(uint256 _pair, address _collateral, address _debt, Lender _lender, uint256 _id)
+        public
+        onlyOwner
+    {
         bytes32 key = keccak256(abi.encodePacked(_pair, _collateral, _debt));
         Lender[] storage lenderList = lenders[key];
         require(lenderList[_id] == _lender, "INVALID_LENDER");
@@ -98,8 +90,7 @@ contract LenderRegistry is Owned {
                 _pair
             );
             Lender _lender = lenderList[i];
-            (uint256 interest, uint256 borrow, uint256 collateral) = _lender
-                .getQuote(_loan);
+            (uint256 interest, uint256 borrow, uint256 collateral) = _lender.getQuote(_loan);
             if (interest + borrow + collateral == 0) {
                 continue; // Not supported by pool
             }
@@ -116,10 +107,8 @@ contract LenderRegistry is Owned {
 
             // Specify borrow and collateral amounts -> get best interest rate
             if (
-                interest < loan.interestRate &&
-                _interest == 0 &&
-                _debtAmount != type(uint256).max &&
-                _collateralAmount != type(uint256).max
+                interest < loan.interestRate && _interest == 0 && _debtAmount != type(uint256).max
+                    && _collateralAmount != type(uint256).max
             ) {
                 loan.interestRate = interest;
                 loan.lender = address(_lender);
@@ -127,20 +116,16 @@ contract LenderRegistry is Owned {
 
             // Specify borrow, interest rate -> get best collateral amount
             if (
-                collateral < loan.collateralAmount &&
-                _interest != 0 &&
-                _debtAmount != type(uint256).max &&
-                _collateralAmount == type(uint256).max
+                collateral < loan.collateralAmount && _interest != 0 && _debtAmount != type(uint256).max
+                    && _collateralAmount == type(uint256).max
             ) {
                 loan.collateralAmount = collateral;
                 loan.lender = address(_lender);
             }
             // Specify collateral, interest rate -> get best borrow amount
             if (
-                borrow < loan.debtAmount &&
-                _interest != 0 &&
-                _debtAmount == type(uint256).max &&
-                _collateralAmount != type(uint256).max
+                borrow < loan.debtAmount && _interest != 0 && _debtAmount == type(uint256).max
+                    && _collateralAmount != type(uint256).max
             ) {
                 loan.debtAmount = borrow;
                 loan.lender = address(_lender);
