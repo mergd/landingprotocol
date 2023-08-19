@@ -11,6 +11,8 @@ import "test/mocks/MockERC20.sol";
 
 /// @notice A very simple deployment script
 contract Deploy is Script {
+    function test() public {}
+
     function run() external returns (LoanCoordinator loanCoordinator) {
         vm.startBroadcast();
         loanCoordinator = new LoanCoordinator();
