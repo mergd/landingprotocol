@@ -71,15 +71,14 @@ contract LoanCoordinatorTest is Test {
         _borrow.mint(address(_lender), 1000e18);
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
-        uint256 _loan =
-            coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 1, 0);
+        uint256 _loan = coordinator.createLoan(address(_lender), _collateral, _borrow, 1e18, 1e18, 0.5 * 1e6, 1, 0);
 
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
-        vm.warp(block.timestamp + 49);
+        vm.warp(block.timestamp + 20);
         (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd);
-        // assertGt(bidAmt, 1e18);
-        // assertLt(collateralAmt, 1e18);
+        assertGt(bidAmt, 1e18); // Inclusive of interest
+        assertLt(collateralAmt, 1e18);
         console2.log("Auction Price", bidAmt);
         borrowMintAndApprove(address(1), bidAmt);
 
@@ -93,13 +92,14 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
         uint256 _loan =
-            coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.01 * 1e6, 1, 0);
+            coordinator.createLoan(address(_lender), _collateral, _borrow, 100e18, 100e18, 0.01 * 10e6, 1, 0);
 
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
         vm.warp(block.timestamp + 90);
         (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd);
-        assertLt(bidAmt, 1e18);
+        assertLt(bidAmt, 100e18);
+        assertEq(collateralAmt, 100e18);
         // assertEq(collateralAmt, 1e18);
         borrowMintAndApprove(address(1), bidAmt);
 
