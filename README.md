@@ -4,16 +4,14 @@
 
 An immutable protocol designed for **composability** and **auditability**.
 
-WIP:
-
-- Finish lender registry contract
-- Get 100% test coverage for the Loan Coordinator contracts
-- Make things more gas efficient
-
 High Level Design goals and docs : [Here](https://hackmd.io/@williamx/ryis1TfI3)
 
-Sepolia Deployment:
-Deployed LoanCoordinator at address: 0x0472fbC74680525B050860FB7908c792094363Fd
-Deployed Lender Registry at address: 0x42A01a2d43280b1889f50f3322c92f5C194Ee40B
-Deployed Debt Token at address: 0x0ACF2f7647B88a11827b923a5c4911CAdA664636
-Deployed Collateral Token at address: 0x2d34A48bCc05CBd7566bBA967A450a35Ce69F97c
+Sepolia deploy and verification (8/24)
+== Return ==
+loanCoordinator: contract LoanCoordinator 0xeF85FBf0AB9882C712709e31b31be0914AC0F5C6
+
+== Logs ==
+Deployed LoanCoordinator at address: 0xeF85FBf0AB9882C712709e31b31be0914AC0F5C6
+Deployed Lender Registry at address: 0x51F5B03efb128475828038c59770Ef49fFFba0a7
+Deployed Debt Token at address: 0x3e5e873700178e4E59CCcfd75b8dc74860F29e58
+Deployed Collateral Token at address: 0x93f1f1995480039cCf22C3C668b3f82be83fC05B
