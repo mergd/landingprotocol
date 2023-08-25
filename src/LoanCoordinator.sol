@@ -8,7 +8,6 @@ import {Lender} from "./Lender.sol";
 import {Borrower} from "./Borrower.sol";
 import "./periphery/NoDelegateCall.sol";
 import "./ILoanCoordinator.sol";
-import "forge-std/Script.sol";
 
 uint256 constant SCALAR = 1e6;
 

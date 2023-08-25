@@ -11,6 +11,11 @@ abstract contract Borrower is NoDelegateCall {
         coordinator = _coordinator;
     }
 
+    modifier onlyCoordinator() {
+        require(msg.sender == address(coordinator), "Borrower: Only coordinator");
+        _;
+    }
+
     ILoanCoordinator public immutable coordinator;
 
     /**

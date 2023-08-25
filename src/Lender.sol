@@ -12,6 +12,11 @@ abstract contract Lender is NoDelegateCall {
         callback = _callback;
     }
 
+    modifier onlyCoordinator() {
+        require(msg.sender == address(coordinator), "Lender: Only coordinator");
+        _;
+    }
+
     bool public immutable callback; // False - No callbacks, True - Allow callbacks
     ILoanCoordinator public immutable coordinator;
 
