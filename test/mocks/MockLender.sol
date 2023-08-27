@@ -39,7 +39,7 @@ contract MockLender is Lender {
         return (0, 0, 0);
     }
 
-    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, bytes32 data)
+    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, uint256 data)
         public
         view
         virtual

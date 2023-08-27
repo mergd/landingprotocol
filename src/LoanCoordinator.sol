@@ -288,10 +288,10 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         uint256 timeElapsed = block.timestamp - auction.startTime;
         uint256 midPoint = auction.duration / 2;
         // Offer 100% of the debt to be repaid, but increase the amount of collateral offered
-        if (auction.startTime + midPoint > block.timestamp) {
+        if (midPoint >= timeElapsed) {
             bidAmount = auction.recoveryAmount;
             collateral = (timeElapsed * loan.collateralAmount) / midPoint;
-        } else if (auction.startTime + midPoint < block.timestamp && timeElapsed < auction.duration) {
+        } else if (timeElapsed < auction.duration) {
             // Offer all the collateral, but reduce the amount of debt to be offered
             bidAmount = auction.recoveryAmount - (((timeElapsed - midPoint) * auction.recoveryAmount) / midPoint);
             collateral = loan.collateralAmount;

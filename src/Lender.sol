@@ -34,7 +34,7 @@ abstract contract Lender is NoDelegateCall {
      * @param loan Loan struct
      * @param data Any additional identifying data
      */
-    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, bytes32 data) public view virtual returns (bool);
+    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, uint256 data) public view virtual returns (bool);
 
     /**
      * Called after loan is repaid
