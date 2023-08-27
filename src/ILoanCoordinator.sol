@@ -79,7 +79,7 @@ interface ILoanCoordinator {
         uint256 _interestRate,
         uint256 _duration,
         uint256 _terms,
-        bytes32 _data
+        uint256 _data
     ) external returns (uint256);
 
     function liquidateLoan(uint256 _loanId) external returns (uint256);

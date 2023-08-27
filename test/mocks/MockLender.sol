@@ -10,7 +10,7 @@ contract MockLender is Lender {
         _debt.approve(address(coordinator), type(uint256).max);
     }
 
-    function verifyLoan(ILoanCoordinator.Loan memory, bytes32) external pure override returns (bool) {
+    function verifyLoan(ILoanCoordinator.Loan memory, uint256) external pure override returns (bool) {
         return true;
     }
 

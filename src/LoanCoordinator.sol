@@ -62,16 +62,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         uint256 _terms
     ) external returns (uint256) {
         return createLoan(
-            _lender,
-            msg.sender,
-            _collateral,
-            _debt,
-            _collateralAmount,
-            _debtAmount,
-            _interestRate,
-            _duration,
-            _terms,
-            ""
+            _lender, msg.sender, _collateral, _debt, _collateralAmount, _debtAmount, _interestRate, _duration, _terms, 0
         );
     }
 
@@ -98,12 +89,12 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         uint256 _interestRate,
         uint256 _duration,
         uint256 _terms,
-        bytes32 _data
+        uint256 _data
     ) public noDelegateCall nonReentrant returns (uint256) {
         loanCount++;
-
+        uint256 _tokenId = loanCount;
         Loan memory newLoan = Loan(
-            loanCount,
+            _tokenId,
             _borrower,
             _lender,
             Lender(_lender).callback(),
@@ -117,7 +108,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
             _terms
         );
 
-        loans[loanCount] = newLoan;
+        loans[_tokenId] = newLoan;
 
         // Lender Hook to verify loan details
         if (!Lender(_lender).verifyLoan(newLoan, _data)) {
@@ -126,12 +117,12 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
 
         _collateral.safeTransferFrom(msg.sender, address(this), _collateralAmount);
 
-        borrowerLoans[_borrower].push(loanCount);
-        borrowerLoanIndex[loanCount] = borrowerLoans[_borrower].length - 1;
+        borrowerLoans[_borrower].push(_tokenId);
+        borrowerLoanIndex[_tokenId] = borrowerLoans[_borrower].length - 1;
         _debt.safeTransferFrom(_lender, address(this), _debtAmount);
         _debt.safeTransfer(msg.sender, _debtAmount);
-        emit LoanCreated(loanCount, newLoan);
-        return loanCount;
+        emit LoanCreated(_tokenId, newLoan);
+        return _tokenId;
     }
 
     /**
@@ -281,6 +272,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
 
         emit AuctionReclaimed(_auctionId, loan.collateralAmount);
     }
+
     /**
      * Get current price of auction
      * @param _auctionId Id of the auction
@@ -354,6 +346,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         if (_interest) {
             loan.debtAmount += calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
         }
+        if (loan.borrower == address(0)) revert Coordinator_LoanNotVerified();
     }
 
     function getAuction(uint256 _auctionId) external view returns (Auction memory auction) {

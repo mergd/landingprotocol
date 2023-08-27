@@ -26,7 +26,7 @@ abstract contract Lender is NoDelegateCall {
      * @param loan Loan struct
      * @param data Any additional identifying data
      */
-    function verifyLoan(ILoanCoordinator.Loan memory loan, bytes32 data) external virtual returns (bool);
+    function verifyLoan(ILoanCoordinator.Loan memory loan, uint256 data) external virtual returns (bool);
 
     /**
      * Verify the loans - should be noDelegateCall
