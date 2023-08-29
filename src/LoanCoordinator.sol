@@ -149,11 +149,8 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         ) revert Coordinator_LoanNotLiquidatable();
 
         uint256 interest = calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
-
+        bool skipAuction = terms.auctionLength == 0;
         uint256 totalDebt = ((loan.debtAmount + interest) * terms.liquidationBonus) / SCALAR;
-        _startAuction(_loanId, totalDebt, terms.auctionLength);
-
-        loan.duration = type(uint256).max; // Auction off loan
 
         // Borrower Hook
         if (isContract(loan.borrower)) {
@@ -161,7 +158,16 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         }
 
         emit LoanLiquidated(_loanId);
-        return auctions.length - 1;
+        if (!skipAuction) {
+            _startAuction(_loanId, totalDebt, terms.auctionLength);
+            loan.duration = type(uint256).max; // Auction off loan
+            return auctions.length - 1;
+        } else {
+            deleteLoan(_loanId, loan.borrower);
+            loan.collateralToken.safeTransfer(msg.sender, loan.collateralAmount);
+            delete loans[_loanId];
+            return 0;
+        }
     }
 
     function repayLoan(uint256 _loanId) public noDelegateCall nonReentrant {
@@ -265,7 +271,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
      * @dev Lender can reclaim the collateral if the auction doesn't clear
      * @param _auctionId the auction to reclaim
      */
-    function reclaim(uint256 _auctionId) external {
+    function reclaim(uint256 _auctionId) external nonReentrant {
         Auction memory auction = auctions[_auctionId];
         if (auction.startTime + auction.duration >= block.timestamp) {
             revert Coordinator_AuctionNotEnded();
@@ -275,8 +281,8 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         delete auctions[_auctionId];
         delete loanIdToAuction[auction.loanId];
 
-        loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
         deleteLoan(auction.loanId, loan.borrower);
+        loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
 
         emit AuctionReclaimed(_auctionId, loan.collateralAmount);
     }

@@ -109,6 +109,23 @@ contract LoanCoordinatorTest is Test {
         coordinator.bid(0);
     }
 
+    function testLoanNoAuction() public {
+        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(
+            1.005 * 1e6, // Liquidation bonus
+            0 // Auction duration
+        );
+        termSet = coordinator.setTerms(_term);
+        _borrow.mint(address(_lender), 100e18);
+        collateralmintAndApprove(_borrower, 100 * 1e18);
+        vm.startPrank(_borrower);
+        uint256 _loan =
+            coordinator.createLoan(address(_lender), _collateral, _borrow, 100e18, 100e18, 0.01 * 10e6, 4, termSet);
+
+        vm.startPrank(address(_lender));
+        _lender.liquidate(_loan);
+        assertEq(100e18, _collateral.balanceOf(address(_lender)));
+    }
+
     function testRebalanceRate() public {
         _borrow.mint(address(_lender), 1000e18);
         collateralmintAndApprove(_borrower, 1000 * 1e18);
