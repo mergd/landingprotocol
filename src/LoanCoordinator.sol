@@ -6,19 +6,27 @@ import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
 import {Lender} from "./Lender.sol";
 import {Borrower} from "./Borrower.sol";
+import "prb-math/UD60x18.sol";
 import "./periphery/NoDelegateCall.sol";
 import "./ILoanCoordinator.sol";
+import "forge-std/console2.sol";
 
 uint256 constant SCALAR = 1e6;
+// Autocompounding interest rate on continual basis
 
-// Use the autocompounding or simple interest, above is the autocompounding
-// Calculate notional accrued interest
 function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
     pure
     returns (uint256 interest)
 {
-    interest = (_interestRate * _debtAmount * _endTime - _startTime) / (365 days * SCALAR);
+    UD60x18 udRT = ud(_endTime - _startTime).div(ud(365 days)).mul(ud(_interestRate + SCALAR));
+    interest = unwrap(exp(udRT).mul(ud(_debtAmount)).sub(ud(_debtAmount)));
 }
+// function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
+//     pure
+//     returns (uint256 interest)
+// {
+//     interest = (_interestRate * _debtAmount * _endTime - _startTime) / (365 days * SCALAR);
+// }
 
 contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
     using SafeTransferLib for ERC20;
