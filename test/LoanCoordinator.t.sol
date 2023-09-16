@@ -3,10 +3,10 @@ pragma solidity ^0.8.17;
 
 import "forge-std/Test.sol";
 
-import "src/LoanCoordinator.sol";
-import "./mocks/MockLender.sol";
+import {LoanCoordinator, ILoanCoordinator} from "src/LoanCoordinator.sol";
+import {MockLender} from "./mocks/MockLender.sol";
 import "./mocks/MockERC20.sol";
-import "./mocks/MockBorrower.sol";
+import {MockBorrower} from "./mocks/MockBorrower.sol";
 
 contract LoanCoordinatorTest is Test {
     LoanCoordinator coordinator;
@@ -46,7 +46,7 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
         uint256 loanId =
-            coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 4, 0);
+            coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 0, 0);
 
         vm.warp(8 hours + 1);
 
@@ -60,7 +60,7 @@ contract LoanCoordinatorTest is Test {
         _borrow.mint(address(_lender), 1000e18);
         collateralmintAndApprove(_borrower, 1000 * 1e18);
         vm.startPrank(_borrower);
-        coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 4, 0);
+        coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 0, 0);
 
         vm.warp(8 hours + 1);
         _lender.liquidate(1);
@@ -119,7 +119,7 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(_borrower, 100 * 1e18);
         vm.startPrank(_borrower);
         uint256 _loan =
-            coordinator.createLoan(address(_lender), _collateral, _borrow, 100e18, 100e18, 0.01 * 10e6, 4, termSet);
+            coordinator.createLoan(address(_lender), _collateral, _borrow, 100e18, 100e18, 0.01 * 10e6, 0, termSet);
 
         vm.startPrank(address(_lender));
         _lender.liquidate(_loan);

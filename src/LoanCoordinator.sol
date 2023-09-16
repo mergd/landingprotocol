@@ -9,7 +9,7 @@ import {Borrower} from "./Borrower.sol";
 import "prb-math/UD60x18.sol";
 import "./periphery/NoDelegateCall.sol";
 import "./ILoanCoordinator.sol";
-import "forge-std/console2.sol";
+import "forge-std/Console2.sol";
 
 uint256 constant SCALAR = 1e6;
 // Autocompounding interest rate on continual basis
@@ -21,12 +21,6 @@ function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _
     UD60x18 udRT = ud(_endTime - _startTime).div(ud(365 days)).mul(ud(_interestRate + SCALAR));
     interest = unwrap(exp(udRT).mul(ud(_debtAmount)).sub(ud(_debtAmount)));
 }
-// function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
-//     pure
-//     returns (uint256 interest)
-// {
-//     interest = (_interestRate * _debtAmount * _endTime - _startTime) / (365 days * SCALAR);
-// }
 
 contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
     using SafeTransferLib for ERC20;
@@ -35,7 +29,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
     uint256 public loanCount;
     Auction[] public auctions;
     Term[] public loanTerms;
-    uint256[5] public durations = [8 hours, 1 days, 2 days, 7 days, 0];
+    uint256[5] public durations = [0, 8 hours, 1 days, 2 days, 7 days];
     mapping(uint256 loanId => uint256 auctionId) public loanIdToAuction;
     mapping(uint256 loanId => Loan loan) public loans;
     mapping(address borrower => uint256[] loanIds) public borrowerLoans;
@@ -361,6 +355,10 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
             loan.debtAmount += calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
         }
         if (loan.borrower == address(0)) revert Coordinator_LoanNotVerified();
+    }
+
+    function viewBorrowerLoans(address _borrower) external view returns (uint256[] memory loanList) {
+        loanList = borrowerLoans[_borrower];
     }
 
     function getAuction(uint256 _auctionId) external view returns (Auction memory auction) {

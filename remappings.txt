@@ -5,3 +5,4 @@ prb-math/=lib/prb-math/src/
 prb-test/=lib/prb-math/lib/prb-test/src/
 solmate/=lib/solmate/src/
 @solmate/=lib/solmate/src/
+solady/=lib/solady/

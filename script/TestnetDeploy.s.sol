@@ -3,9 +3,7 @@ pragma solidity ^0.8.17;
 
 import "forge-std/Script.sol";
 
-import "src/LoanCoordinator.sol";
-
-import "src/periphery/LenderRegistry.sol";
+import {LoanCoordinator} from "src/LoanCoordinator.sol";
 
 import "test/mocks/MockERC20.sol";
 
@@ -18,11 +16,11 @@ contract Deploy is Script {
         loanCoordinator = new LoanCoordinator();
         console2.log("Deployed LoanCoordinator at address: ", address(loanCoordinator));
 
-        LenderRegistry lenderRegistry = new LenderRegistry(
-            loanCoordinator,
-            address(this)
-        );
-        console2.log("Deployed Lender Registry at address: ", address(lenderRegistry));
+        // LenderRegistry lenderRegistry = new LenderRegistry(
+        //     loanCoordinator,
+        //     address(this)
+        // );
+        // console2.log("Deployed Lender Registry at address: ", address(lenderRegistry));
 
         MockERC20 debtToken = new MockERC20("Debt Token", "DEBT", 18);
         console2.log("Deployed Debt Token at address: ", address(debtToken));
