@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.22;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
@@ -7,7 +7,6 @@ import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
 import {Lender} from "./Lender.sol";
 import {Borrower} from "./Borrower.sol";
 import "prb-math/UD60x18.sol";
-import "./periphery/NoDelegateCall.sol";
 import "./ILoanCoordinator.sol";
 import "forge-std/Console2.sol";
 
@@ -22,7 +21,7 @@ function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _
     interest = unwrap(exp(udRT).mul(ud(_debtAmount)).sub(ud(_debtAmount)));
 }
 
-contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
+contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     using SafeTransferLib for ERC20;
 
     //State
@@ -92,7 +91,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         uint256 _duration,
         uint256 _terms,
         uint256 _data
-    ) public noDelegateCall nonReentrant returns (uint256) {
+    ) public nonReentrant returns (uint256) {
         loanCount++;
         uint256 _tokenId = loanCount;
         Loan memory newLoan = Loan(
@@ -150,6 +149,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         if (isContract(loan.borrower)) {
             loan.borrower.call(abi.encodeWithSignature("liquidationHook(Loan)", loan));
         }
+        // ensure
 
         emit LoanLiquidated(_loanId);
         if (!skipAuction) {
@@ -164,7 +164,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
         }
     }
 
-    function repayLoan(uint256 _loanId) public noDelegateCall nonReentrant {
+    function repayLoan(uint256 _loanId) public nonReentrant {
         Loan memory loan = loans[_loanId];
         uint256 interest = calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
         uint256 totalDebt = loan.debtAmount + interest;
@@ -224,7 +224,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
     /**
      * @dev Bid on an auction at the current price
      */
-    function bid(uint256 _auctionId) external noDelegateCall nonReentrant {
+    function bid(uint256 _auctionId) external nonReentrant {
         Auction memory auction = auctions[_auctionId];
         Loan memory loan = loans[auction.loanId];
         (uint256 bidAmount, uint256 collateralAmt) = getCurrentPrice(_auctionId);
@@ -314,10 +314,7 @@ contract LoanCoordinator is NoDelegateCall, ReentrancyGuard, ILoanCoordinator {
     // Functions: Misc
     // ============================================================================================
 
-    function getFlashLoan(address _borrower, ERC20 _token, uint256 _amount, bytes memory _data)
-        external
-        noDelegateCall
-    {
+    function getFlashLoan(address _borrower, ERC20 _token, uint256 _amount, bytes memory _data) external {
         _token.safeTransfer(_borrower, _amount);
 
         if (!Borrower(_borrower).executeOperation(_token, _amount, msg.sender, _data)) {

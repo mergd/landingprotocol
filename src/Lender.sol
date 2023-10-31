@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.22;
 
 import {LoanCoordinator} from "./LoanCoordinator.sol";
 import "./ILoanCoordinator.sol";
-import "./periphery/NoDelegateCall.sol";
 
-abstract contract Lender is NoDelegateCall {
+abstract contract Lender {
     // Callback contracts can prevent repayments and bidding, so it's somewhat trusted
-    constructor(ILoanCoordinator _coordinator, bool _callback) NoDelegateCall() {
+    constructor(ILoanCoordinator _coordinator, bool _callback) {
         coordinator = _coordinator;
         callback = _callback;
     }

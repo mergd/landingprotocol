@@ -1,6 +1,6 @@
 cache/
 out/
-
+lib/
 # Ignore Environment Variables!
 .env
 .env.prod

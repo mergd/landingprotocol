@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.22;
 
 import {LoanCoordinator} from "./LoanCoordinator.sol";
 import "./ILoanCoordinator.sol";
-import "./periphery/NoDelegateCall.sol";
 
 /// @dev Optional interface for borrowers to implement
-abstract contract Borrower is NoDelegateCall {
+abstract contract Borrower {
     constructor(ILoanCoordinator _coordinator) {
         coordinator = _coordinator;
     }
