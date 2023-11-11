@@ -20,20 +20,23 @@ abstract contract Lender {
     ILoanCoordinator public immutable coordinator;
 
     /**
-     * Verify the loans - should be noDelegateCall
+     * Verify the loans
      * @dev THIS SHOULD BE RESTRICTED TO ONLY THE COORDINATOR IF IT UPDATES STATE
      * @param loan Loan struct
      * @param data Any additional identifying data
      */
-    function verifyLoan(ILoanCoordinator.Loan memory loan, uint256 data) external virtual returns (bool);
+    function verifyLoan(ILoanCoordinator.Loan memory loan, bytes calldata data) external virtual returns (bytes4);
 
     /**
-     * Verify the loans - should be noDelegateCall
      * View function for verifying loan for UI
      * @param loan Loan struct
      * @param data Any additional identifying data
      */
-    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, uint256 data) public view virtual returns (bool);
+    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, bytes calldata data)
+        public
+        view
+        virtual
+        returns (bool);
 
     /**
      * Called after loan is repaid

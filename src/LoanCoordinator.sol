@@ -45,8 +45,14 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     error Coordinator_LenderUpdateFailed();
     error Coordinator_AuctionEnded(uint256);
     error Coordinator_FlashloanFailed();
+    error Coordinator_InvalidTerms();
 
-    constructor() {}
+    constructor() {
+        // Create initial term
+        Term memory _term = Term(0, 0);
+        loanTerms.push(_term);
+        emit TermsSet(0, _term);
+    }
 
     // ============================================================================================
     // Functions: Lending
@@ -60,10 +66,20 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         uint256 _debtAmount,
         uint256 _interestRate,
         uint256 _duration,
-        uint256 _terms
+        uint256 _terms,
+        bytes calldata _data
     ) external returns (uint256) {
         return createLoan(
-            _lender, msg.sender, _collateral, _debt, _collateralAmount, _debtAmount, _interestRate, _duration, _terms, 0
+            _lender,
+            msg.sender,
+            _collateral,
+            _debt,
+            _collateralAmount,
+            _debtAmount,
+            _interestRate,
+            _duration,
+            _terms,
+            _data
         );
     }
 
@@ -90,7 +106,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         uint256 _interestRate,
         uint256 _duration,
         uint256 _terms,
-        uint256 _data
+        bytes calldata _data
     ) public nonReentrant returns (uint256) {
         loanCount++;
         uint256 _tokenId = loanCount;
@@ -112,7 +128,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         loans[_tokenId] = newLoan;
 
         // Lender Hook to verify loan details
-        if (!Lender(_lender).verifyLoan(newLoan, _data)) {
+        if (Lender(_lender).verifyLoan(newLoan, _data) != Lender.verifyLoan.selector) {
             revert Coordinator_LoanNotVerified();
         }
 
@@ -142,17 +158,17 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         ) revert Coordinator_LoanNotLiquidatable();
 
         uint256 interest = calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
-        bool skipAuction = terms.auctionLength == 0;
         uint256 totalDebt = ((loan.debtAmount + interest) * terms.liquidationBonus) / SCALAR;
 
         // Borrower Hook
         if (isContract(loan.borrower)) {
-            loan.borrower.call(abi.encodeWithSignature("liquidationHook(Loan)", loan));
+            (bool _success,) = loan.borrower.call(abi.encodeWithSignature("liquidationHook(Loan)", loan));
+            if (_success) emit BorrowerNotified(_loanId);
         }
-        // ensure
 
         emit LoanLiquidated(_loanId);
-        if (!skipAuction) {
+        // Skip auction if auction period is set to 0
+        if (!(terms.auctionLength == 0)) {
             _startAuction(_loanId, totalDebt, terms.auctionLength);
             loan.duration = type(uint256).max; // Auction off loan
             return auctions.length - 1;
@@ -175,7 +191,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         }
 
         deleteLoan(_loanId, loan.borrower);
-        if (loan.duration == 0) delete auctions[loanIdToAuction[_loanId]];
+        // Delete corresponding liquidation if the loan is repaid
+        if (loan.duration == type(uint256).max) delete auctions[loanIdToAuction[_loanId]];
 
         emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
     }
@@ -205,7 +222,9 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         loan.interestRate = _newRate;
         // Borrower Hook
         if (isContract(loan.borrower)) {
-            loan.borrower.call(abi.encodeWithSignature("interestRateUpdateHook(Loan,uint256)", loan, _newRate));
+            (bool _success,) =
+                loan.borrower.call(abi.encodeWithSignature("interestRateUpdateHook(Loan,uint256)", loan, _newRate));
+            if (_success) emit BorrowerNotified(_loanId);
         }
 
         emit RateRebalanced(_loanId, _newRate);
@@ -241,9 +260,10 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         ) revert Coordinator_LenderUpdateFailed();
 
         if (isContract(loan.borrower)) {
-            loan.borrower.call(
+            (bool _success,) = loan.borrower.call(
                 abi.encodeWithSignature("auctionSettledHook(Loan,uint256,uint256)", loan, bidAmount, borrowerReturn)
             );
+            if (_success) emit BorrowerNotified(auction.loanId);
         }
 
         // Delete the loan
@@ -330,6 +350,11 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
      * @param _terms the terms to set
      */
     function setTerms(Term memory _terms) external returns (uint256) {
+        // Check that liquidation bonus is within bounds
+        if (_terms.liquidationBonus > SCALAR * 2 || _terms.liquidationBonus < SCALAR) revert Coordinator_InvalidTerms();
+        // Check that auction length is within bounds
+        if (_terms.auctionLength > 30 days || _terms.auctionLength == 0) revert Coordinator_InvalidTerms();
+
         loanTerms.push(_terms);
         emit TermsSet(loanTerms.length - 1, _terms);
         return loanTerms.length - 1;

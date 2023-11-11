@@ -54,6 +54,7 @@ interface ILoanCoordinator {
     event LoanLiquidated(uint256 indexed loanId);
     event TermsSet(uint256 termId, Term term);
     event Flashloan(address borrower, ERC20 token, uint256 amount);
+    event BorrowerNotified(uint256 loanId);
 
     /**
      * CONTRACT FUNCTIONS
@@ -66,7 +67,8 @@ interface ILoanCoordinator {
         uint256 _debtAmount,
         uint256 _interestRate,
         uint256 _duration,
-        uint256 _terms
+        uint256 _terms,
+        bytes calldata _data
     ) external returns (uint256);
 
     function createLoan(
@@ -79,7 +81,7 @@ interface ILoanCoordinator {
         uint256 _interestRate,
         uint256 _duration,
         uint256 _terms,
-        uint256 _data
+        bytes calldata _data
     ) external returns (uint256);
 
     function liquidateLoan(uint256 _loanId) external returns (uint256);

@@ -10,8 +10,8 @@ contract MockLender is Lender {
         _debt.approve(address(coordinator), type(uint256).max);
     }
 
-    function verifyLoan(ILoanCoordinator.Loan memory, uint256) external pure override returns (bool) {
-        return true;
+    function verifyLoan(ILoanCoordinator.Loan memory, bytes calldata) external pure override returns (bytes4) {
+        return Lender.verifyLoan.selector;
     }
 
     function auctionSettledHook(ILoanCoordinator.Loan memory, uint256, uint256)
@@ -39,13 +39,7 @@ contract MockLender is Lender {
         return (0, 0, 0);
     }
 
-    function viewVerifyLoan(ILoanCoordinator.Loan memory loan, uint256 data)
-        public
-        view
-        virtual
-        override
-        returns (bool)
-    {
+    function viewVerifyLoan(ILoanCoordinator.Loan memory, bytes calldata) public view virtual override returns (bool) {
         return true;
     }
 }
