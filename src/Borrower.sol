@@ -10,8 +10,10 @@ abstract contract Borrower {
         coordinator = _coordinator;
     }
 
+    error Borrower_OnlyCoordinator();
+
     modifier onlyCoordinator() {
-        require(msg.sender == address(coordinator), "Borrower: Only coordinator");
+        if (msg.sender != address(coordinator)) revert Borrower_OnlyCoordinator();
         _;
     }
 
@@ -19,24 +21,24 @@ abstract contract Borrower {
 
     /**
      * @dev Called when loan is liquidated
-     * @param loan Loan struct
+     * @param _loan Loan struct
      */
-    function liquidationHook(ILoanCoordinator.Loan memory loan) external virtual;
+    function liquidationHook(ILoanCoordinator.Loan memory _loan) external virtual;
 
     /**
      * @dev Called when the interest rate is rebalanced
-     * @param loan Loan struct
-     * @param newRate New interest rate
+     * @param _loan Loan struct
+     * @param _newRate New interest rate
      */
-    function interestRateUpdateHook(ILoanCoordinator.Loan memory loan, uint256 newRate) external virtual;
+    function interestRateUpdateHook(ILoanCoordinator.Loan memory _loan, uint256 _newRate) external virtual;
 
     /**
      * @dev Called when the auction is settled
-     * @param loan Loan struct
-     * @param lenderReturn Amount returned to lender – at max this is principal + interest + penalty
-     * @param borrowerReturn Excess collateral returned to borrower
+     * @param _loan Loan struct
+     * @param _lenderReturn Amount returned to lender – at max this is principal + interest + penalty
+     * @param _borrowerReturn Excess collateral returned to borrower
      */
-    function auctionSettledHook(ILoanCoordinator.Loan memory loan, uint256 lenderReturn, uint256 borrowerReturn)
+    function auctionSettledHook(ILoanCoordinator.Loan memory _loan, uint256 _lenderReturn, uint256 _borrowerReturn)
         external
         virtual;
 

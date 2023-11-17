@@ -114,6 +114,38 @@ contract LoanCoordinatorTest is Test {
         vm.startPrank(address(1));
         coordinator.bid(0);
     }
+    // Test reclaim
+
+    function testBid3() public {
+        uint256 _termSet = createTerm(1.5 * 1e6, 100);
+
+        _borrow.mint(address(_lender), 1000e18);
+        collateralmintAndApprove(_borrower, 1000 * 1e18);
+        vm.startPrank(_borrower);
+        uint256 _loan =
+            coordinator.createLoan(address(_lender), _collateral, _borrow, 100e18, 100e18, 0.01 * 10e6, 1, _termSet, "");
+
+        vm.warp(1 days + 1);
+        uint256 liqd = _lender.liquidate(_loan);
+        vm.warp(block.timestamp + 100);
+        (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd);
+        assertEq(bidAmt, 0);
+        assertEq(collateralAmt, 0);
+        borrowMintAndApprove(address(1), bidAmt);
+
+        console2.log("Auction Price", bidAmt);
+        console2.log("Coll amt Price", collateralAmt);
+        vm.startPrank(address(1));
+        // Auction has failed to clear
+        vm.expectRevert();
+        coordinator.bid(0);
+
+        // Reclaim
+        _lender.reclaim(0);
+        // Collateral sent to lender
+
+        assertEq(_collateral.balanceOf(address(_lender)), 100e18);
+    }
 
     function testLoanNoAuction() public {
         _borrow.mint(address(_lender), 100e18);
@@ -182,13 +214,15 @@ contract LoanCoordinatorTest is Test {
 
     function testFailFlashLoan() public {
         _borrow.mint(address(_lender), 1000e18);
-        collateralmintAndApprove(_borrower, 1000 * 1e18);
-        vm.startPrank(_borrower);
+        collateralmintAndApprove(address(_lender), 1000 * 1e18);
+        vm.startPrank(address(_lender));
         coordinator.createLoan(address(_lender), _collateral, _borrow, 1 * 1e18, 1 * 1e18, 0.5 * 1e6, 0, 0, "");
 
+        // Flashloan reverts
         MockBorrower(_borrower).getFlashloan(false, _collateral);
-        vm.expectRevert();
     }
+
+    // function testGetLoans(uint256)
 
     // Test Utils
     function collateralmintAndApprove(address receipient, uint256 amount) public {

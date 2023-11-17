@@ -88,7 +88,7 @@ interface ILoanCoordinator {
 
     function repayLoan(uint256 _loanId) external;
 
-    function rebalanceRate(uint256 _loanId, uint256 _newRate) external;
+    function rebalanceRate(uint256 _loanId, uint256 _newRate) external returns (uint256 _interest);
 
     function bid(uint256 _auctionId) external;
 

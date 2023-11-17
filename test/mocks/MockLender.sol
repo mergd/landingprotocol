@@ -35,11 +35,15 @@ contract MockLender is Lender {
         coordinator.rebalanceRate(loan, newRate);
     }
 
-    function getQuote(ILoanCoordinator.Loan memory) external pure override returns (uint256, uint256, uint256) {
-        return (0, 0, 0);
+    function reclaim(uint256 _loanId) external virtual override {
+        coordinator.reclaim(_loanId);
     }
 
     function viewVerifyLoan(ILoanCoordinator.Loan memory, bytes calldata) public view virtual override returns (bool) {
         return true;
     }
+
+    function getLTV(ILoanCoordinator.Loan memory _loan) external view virtual override returns (uint256) {}
+
+    function getRate(ILoanCoordinator.Loan memory _loan) external view virtual override returns (uint256) {}
 }

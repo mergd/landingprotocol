@@ -9,33 +9,25 @@ contract MockBorrower is Borrower {
 
     /**
      * @dev Called when loan is liquidated
-     * @param loan Loan struct
      */
-    function liquidationHook(ILoanCoordinator.Loan memory loan) external override {}
+    function liquidationHook(ILoanCoordinator.Loan memory) external override {
+        console2.log("Liquidation hook called");
+    }
 
-    /**
-     * @dev Called when the interest rate is rebalanced
-     * @param loan Loan struct
-     * @param newRate New interest rate
-     */
-    function interestRateUpdateHook(ILoanCoordinator.Loan memory loan, uint256 newRate) external virtual override {}
+    function interestRateUpdateHook(ILoanCoordinator.Loan memory, uint256) external virtual override {
+        console2.log("Interest rate update hook called");
+    }
 
-    /**
-     * @dev Called when the auction is settled
-     * @param loan Loan struct
-     * @param lenderReturn Amount returned to lender – at max this is principal + interest + penalty
-     * @param borrowerReturn Excess collateral returned to borrower
-     */
-    function auctionSettledHook(ILoanCoordinator.Loan memory loan, uint256 lenderReturn, uint256 borrowerReturn)
-        external
-        override
-    {}
+    function auctionSettledHook(ILoanCoordinator.Loan memory, uint256, uint256) external override {
+        console2.log("Auction settled hook called");
+    }
 
     /**
      * @dev Flashloan callback
      */
     function executeOperation(ERC20 token, uint256, address, bytes memory data) external override returns (bool) {
         if (abi.decode(data, (bool))) {
+            console2.log("Approving");
             token.approve(msg.sender, type(uint256).max);
         }
         // Should by default revert
