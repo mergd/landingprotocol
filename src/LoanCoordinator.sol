@@ -11,13 +11,14 @@ import "./ILoanCoordinator.sol";
 import "forge-std/Console2.sol";
 
 uint256 constant SCALAR = 1e6;
+uint256 constant WAD = 1e18;
 // Autocompounding interest rate on continual basis
 
 function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
     pure
     returns (uint256 interest)
 {
-    UD60x18 udRT = ud(_endTime - _startTime).div(ud(365 days)).mul(ud(_interestRate + SCALAR));
+    UD60x18 udRT = ud(_endTime - _startTime).div(ud(365 days)).mul(ud(_interestRate + WAD));
     interest = unwrap(exp(udRT).mul(ud(_debtAmount)).sub(ud(_debtAmount)));
 }
 
@@ -91,7 +92,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
      * @param _debt ERC20 debt token
      * @param _collateralAmount the amount of collateral, denominated in _collateral
      * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan, scaled by SCALAR (noncompounding)
+     * @param _interestRate the APR on the loan, scaled by WAD (compounding)
      * @param _duration the duration of the loan a selection of one of the durations array
      * @param _terms terms of the loan
      * @param _data data to be passed to the lender contract
@@ -219,8 +220,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
                 || _loan.duration + _loan.startingTime > block.timestamp
         ) revert Coordinator_LoanNotAdjustable();
 
-        // Add a check to prevent rate from being too high, or as long as it's lower than the existing rate – maximum rate is 200% APY
-        if (_newRate >= SCALAR * 2 || (_newRate >= SCALAR * 2 && _newRate > _loan.interestRate)) {
+        // Add a check to prevent rate from being too high, or as long as it's lower than the existing rate – maximum rate is 1000% APY
+        if (_newRate >= WAD * 10 || (_newRate >= WAD * 10 && _newRate > _loan.interestRate)) {
             revert Coordinator_InterestRateTooHigh();
         }
 
