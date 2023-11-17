@@ -12,7 +12,9 @@ import "forge-std/Console2.sol";
 
 uint256 constant SCALAR = 1e6;
 uint256 constant WAD = 1e18;
-// Autocompounding interest rate on continual basis
+/**
+ * @dev Helper function to calculate interest – uses continually compound interest formula
+ */
 
 function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
     pure
@@ -22,6 +24,10 @@ function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _
     interest = unwrap(exp(udRT).mul(ud(_debtAmount)).sub(ud(_debtAmount)));
 }
 
+/**
+ * @title LoanCoordinator
+ * @author mergd
+ */
 contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     using SafeTransferLib for ERC20;
 
@@ -36,18 +42,6 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     mapping(uint256 loanId => uint256 borrowerIndex) private borrowerLoanIndex;
     // Lender loans should be tracked in lender contract
 
-    // Errors
-    error Coordinator_LoanNotVerified();
-    error Coordinator_LoanNotLiquidatable();
-    error Coordinator_LoanNotAdjustable();
-    error Coordinator_InterestRateTooHigh();
-    error Coordinator_OnlyLender();
-    error Coordinator_AuctionNotEnded();
-    error Coordinator_LenderUpdateFailed();
-    error Coordinator_AuctionEnded(uint256);
-    error Coordinator_FlashloanFailed();
-    error Coordinator_InvalidTerms();
-
     constructor() {
         // Create initial term
         Term memory _term = Term(0, 0);
@@ -58,46 +52,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     // ============================================================================================
     // Functions: Lending
     // ============================================================================================
-
-    function createLoan(
-        address _lender,
-        ERC20 _collateral,
-        ERC20 _debt,
-        uint256 _collateralAmount,
-        uint256 _debtAmount,
-        uint256 _interestRate,
-        uint256 _duration,
-        uint256 _terms,
-        bytes calldata _data
-    ) external returns (uint256) {
-        return createLoan(
-            _lender,
-            msg.sender,
-            _collateral,
-            _debt,
-            _collateralAmount,
-            _debtAmount,
-            _interestRate,
-            _duration,
-            _terms,
-            _data
-        );
-    }
-
-    /**
-     * @dev User initiates the loan
-     * @param _lender Lender contract. Lender contract MUST be somewhat trusted
-     * @param _borrower Borrower address
-     * @param _collateral ERC20 Collateral
-     * @param _debt ERC20 debt token
-     * @param _collateralAmount the amount of collateral, denominated in _collateral
-     * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan, scaled by WAD (compounding)
-     * @param _duration the duration of the loan a selection of one of the durations array
-     * @param _terms terms of the loan
-     * @param _data data to be passed to the lender contract
-     * @return _tokenId the loan id
-     */
+    /// @inheritdoc ILoanCoordinator
     function createLoan(
         address _lender,
         address _borrower,
@@ -109,47 +64,63 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         uint256 _duration,
         uint256 _terms,
         bytes calldata _data
-    ) public nonReentrant returns (uint256 _tokenId) {
-        loanCount++;
-        _tokenId = loanCount;
-        Loan memory _newLoan = Loan(
-            _tokenId,
+    ) external returns (uint256) {
+        Loan memory _loan = Loan(
+            0,
             _borrower,
             _lender,
-            Lender(_lender).callback(),
+            false,
             _collateral,
             _debt,
             _collateralAmount,
             _debtAmount,
             _interestRate,
-            block.timestamp,
+            0,
             durations[_duration],
             _terms
+        );
+        return createLoan(_loan, _data);
+    }
+
+    /// @inheritdoc ILoanCoordinator
+    function createLoan(Loan memory _loan, bytes calldata _data) public nonReentrant returns (uint256 _tokenId) {
+        if (_loan.duration == type(uint256).max) revert Coordinator_InvalidDuration();
+        loanCount++;
+        _tokenId = loanCount;
+        Loan memory _newLoan = Loan(
+            _tokenId,
+            _loan.borrower,
+            _loan.lender,
+            Lender(_loan.lender).callback(),
+            _loan.collateralToken,
+            _loan.debtToken,
+            _loan.collateralAmount,
+            _loan.debtAmount,
+            _loan.interestRate,
+            block.timestamp,
+            _loan.duration,
+            _loan.terms
         );
 
         loans[_tokenId] = _newLoan;
 
         // Lender Hook to verify loan details
-        if (Lender(_lender).verifyLoan(_newLoan, _data) != Lender.verifyLoan.selector) {
+        if (Lender(_loan.lender).verifyLoan(_newLoan, _data) != Lender.verifyLoan.selector) {
             revert Coordinator_LoanNotVerified();
         }
 
-        _collateral.safeTransferFrom(msg.sender, address(this), _collateralAmount);
+        _loan.collateralToken.safeTransferFrom(msg.sender, address(this), _loan.collateralAmount);
 
-        borrowerLoans[_borrower].push(_tokenId);
-        borrowerLoanIndex[_tokenId] = borrowerLoans[_borrower].length - 1;
+        borrowerLoans[_loan.borrower].push(_tokenId);
+        borrowerLoanIndex[_tokenId] = borrowerLoans[_loan.borrower].length - 1;
 
-        _debt.safeTransferFrom(_lender, address(this), _debtAmount);
-        _debt.safeTransfer(msg.sender, _debtAmount);
+        _loan.debtToken.safeTransferFrom(_loan.lender, address(this), _loan.debtAmount);
+        _loan.debtToken.safeTransfer(msg.sender, _loan.debtAmount);
 
         emit LoanCreated(_tokenId, _newLoan);
     }
 
-    /**
-     * @dev Initiate a dutch auction to liquidate the laon
-     * @param _loanId the loan to liquidate
-     * @return _auctionId auction id
-     */
+    ///@inheritdoc ILoanCoordinator
     function liquidateLoan(uint256 _loanId) external returns (uint256 _auctionId) {
         Loan storage _loan = loans[_loanId];
         Term memory _terms = loanTerms[_loan.terms];
@@ -183,11 +154,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
         emit LoanLiquidated(_loanId);
     }
-    /**
-     * Repay the loan
-     * @param _loanId LoanId to repay
-     */
 
+    /// @inheritdoc ILoanCoordinator
     function repayLoan(uint256 _loanId) public nonReentrant {
         Loan memory loan = loans[_loanId];
         uint256 interest = calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
@@ -205,12 +173,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
     }
 
-    /**
-     * @dev Rebalance the interest rate, and realize accrued interest as principal
-     * @param _loanId the loan to rebalance
-     * @param _newRate the new rate
-     * @return _interest realized amount
-     */
+    /// @inheritdoc ILoanCoordinator
     function rebalanceRate(uint256 _loanId, uint256 _newRate) external nonReentrant returns (uint256 _interest) {
         Loan storage _loan = loans[_loanId];
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
@@ -251,10 +214,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit AuctionCreated(newAuction);
     }
 
-    /**
-     * @dev Bid on an auction at the current price
-     * @param _auctionId the auction to bid on
-     */
+    ///@inheritdoc ILoanCoordinator
     function bid(uint256 _auctionId) external nonReentrant {
         Auction memory _auction = auctions[_auctionId];
         Loan memory _loan = loans[_auction.loanId];
@@ -293,13 +253,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit AuctionSettled(_auctionId, msg.sender, _bidAmount);
     }
 
-    /**
-     * Get current price of auction
-     * @param _auctionId Id of the auction
-     * @return _bidAmount Amount of debt token to bid
-     * @return _collateral Amount of collateral token to receive
-     */
-
+    /// @inheritdoc ILoanCoordinator
     function getCurrentPrice(uint256 _auctionId) public view returns (uint256 _bidAmount, uint256 _collateral) {
         Auction memory _auction = auctions[_auctionId];
         Loan memory _loan = loans[_auction.loanId];
@@ -321,11 +275,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             _collateral = 0;
         }
     }
-    /**
-     * @dev Lender can reclaim the collateral if the auction doesn't clear
-     * @param _auctionId the auction to reclaim
-     */
 
+    ///@inheritdoc ILoanCoordinator
     function reclaim(uint256 _auctionId) external nonReentrant {
         Auction memory _auction = auctions[_auctionId];
         if (_auction.startTime + _auction.duration > block.timestamp) {
@@ -345,7 +296,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     // ============================================================================================
     // Functions: Misc
     // ============================================================================================
-
+    /// @inheritdoc ILoanCoordinator
     function getFlashLoan(address _borrower, ERC20 _token, uint256 _amount, bytes memory _data) external {
         _token.safeTransfer(_borrower, _amount);
 
@@ -357,10 +308,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit Flashloan(_borrower, _token, _amount);
     }
 
-    /**
-     * @dev Set the terms of the loan
-     * @param _terms the terms to set
-     */
+    ///@inheritdoc ILoanCoordinator
     function setTerms(Term memory _terms) external returns (uint256) {
         // Check that liquidation bonus is within bounds
         if (_terms.liquidationBonus > SCALAR * 2 || _terms.liquidationBonus < SCALAR) revert Coordinator_InvalidTerms();

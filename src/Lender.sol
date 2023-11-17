@@ -63,17 +63,4 @@ abstract contract Lender {
      * @param _loanId The _loan ID
      */
     function reclaim(uint256 _loanId) external virtual;
-
-    /**
-     * @dev The maximum amount of debt token borrowable for a given loan.
-     * @param _loan Pass in a _loan struct.
-     */
-    function getLTV(ILoanCoordinator.Loan memory _loan) external view virtual returns (uint256);
-
-    /**
-     * @dev Returns the interest rate for a given loan.
-     * @param _loan Pass in a _loan struct.
-     * @return The interest rate.
-     */
-    function getRate(ILoanCoordinator.Loan memory _loan) external view virtual returns (uint256);
 }
