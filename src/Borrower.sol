@@ -29,8 +29,11 @@ abstract contract Borrower {
      * @dev Called when the interest rate is rebalanced
      * @param _loan Loan struct
      * @param _newRate New interest rate
+     * @param _interest Realized accrued interest
      */
-    function interestRateUpdateHook(ILoanCoordinator.Loan memory _loan, uint256 _newRate) external virtual;
+    function interestRateUpdateHook(ILoanCoordinator.Loan memory _loan, uint256 _newRate, uint256 _interest)
+        external
+        virtual;
 
     /**
      * @dev Called when the auction is settled

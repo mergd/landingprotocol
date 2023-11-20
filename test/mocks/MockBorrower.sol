@@ -14,7 +14,7 @@ contract MockBorrower is Borrower {
         console2.log("Liquidation hook called");
     }
 
-    function interestRateUpdateHook(ILoanCoordinator.Loan memory, uint256) external virtual override {
+    function interestRateUpdateHook(ILoanCoordinator.Loan memory, uint256, uint256) external virtual override {
         console2.log("Interest rate update hook called");
     }
 

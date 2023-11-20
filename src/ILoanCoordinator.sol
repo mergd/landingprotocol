@@ -4,31 +4,33 @@ pragma solidity ^0.8.22;
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 
 interface ILoanCoordinator {
+    // 5 words
     struct Loan {
-        uint256 id;
+        uint96 id;
         address borrower;
         address lender;
         bool callback;
         ERC20 collateralToken;
+        uint96 collateralAmount;
         ERC20 debtToken;
-        uint256 collateralAmount;
-        uint256 debtAmount;
-        uint256 interestRate;
-        uint256 startingTime;
-        uint256 duration;
-        uint256 terms;
+        uint96 debtAmount;
+        uint128 interestRate;
+        uint64 startingTime;
+        uint24 duration;
+        uint40 terms;
     }
 
     struct Term {
-        uint256 liquidationBonus;
-        uint256 auctionLength;
+        uint24 liquidationBonus;
+        uint24 auctionLength;
     }
 
+    // 1 word
     struct Auction {
-        uint256 loanId;
-        uint256 recoveryAmount;
-        uint256 duration;
-        uint256 startTime;
+        uint96 loanId;
+        uint96 recoveryAmount;
+        uint24 duration;
+        uint40 startTime;
     }
 
     /* -------------------------------------------------------------------------- */
@@ -36,7 +38,7 @@ interface ILoanCoordinator {
     /* -------------------------------------------------------------------------- */
     function loanCount() external view returns (uint256);
 
-    function durations(uint256 index) external view returns (uint256);
+    function durations(uint256 index) external view returns (uint24);
 
     function loanIdToAuction(uint256 loanId) external view returns (uint256);
 
@@ -71,6 +73,7 @@ interface ILoanCoordinator {
     error Coordinator_AuctionEnded(uint256);
     error Coordinator_FlashloanFailed();
     error Coordinator_InvalidTerms();
+    error Coordinator_InvalidLoan();
 
     /* -------------------------------------------------------------------------- */
     /*                             Contract Functions                             */

@@ -1,0 +1,37 @@
+Compiling 1 files with 0.8.22
+Solc 0.8.22 finished in 1.93s
+Compiler run [33msuccessful with warnings:[0m
+[1;33mWarning (2018)[0m[1;37m: Function state mutability can be restricted to pure[0m
+  [34m-->[0m test/mocks/MockBorrower.sol:13:5:
+[34m   |[0m
+[34m13 |[0m     [33mfunction liquidationHook(ILoanCoordinator.Loan memory) external override {[0m
+[34m   |[0m     [1;33m^ (Relevant source part starts here and spans across multiple lines).[0m
+
+[1;33mWarning (2018)[0m[1;37m: Function state mutability can be restricted to pure[0m
+  [34m-->[0m test/mocks/MockBorrower.sol:21:5:
+[34m   |[0m
+[34m21 |[0m     [33mfunction auctionSettledHook(ILoanCoordinator.Loan memory, uint256, uint256) external override {[0m
+[34m   |[0m     [1;33m^ (Relevant source part starts here and spans across multiple lines).[0m
+
+
+Running 1 test for script/TestnetDeploy.s.sol:Deploy
+[32m[PASS][0m test() (gas: 120)
+Test result: [32mok[0m. [32m1[0m passed; [31m0[0m failed; [33m0[0m skipped; finished in 3.40ms
+
+Running 13 tests for test/LoanCoordinator.t.sol:LoanCoordinatorTest
+[32m[PASS][0m testBid1() (gas: 529392)
+[32m[PASS][0m testBid2() (gas: 511797)
+[32m[PASS][0m testBid3() (gas: 445060)
+[32m[PASS][0m testFailFlashLoan() (gas: 71187)
+[32m[PASS][0m testFlashLoan() (gas: 375788)
+[32m[PASS][0m testInvalidTerms() (gas: 11556)
+[32m[PASS][0m testLend() (gas: 328285)
+[32m[PASS][0m testLiquidate() (gas: 340417)
+[31m[FAIL. Reason: assertion failed][0m testLoanNoAuction() (gas: 351134)
+[32m[PASS][0m testRebalanceRate() (gas: 334377)
+[32m[PASS][0m testReclaim() (gas: 424544)
+[32m[PASS][0m testRepay() (gas: 375356)
+[32m[PASS][0m testRepayWhileAuction() (gas: 448281)
+Test result: [31mFAILED[0m. [32m12[0m passed; [31m1[0m failed; [33m0[0m skipped; finished in 7.52ms
+ 
+Ran 2 test suites: [32m13[0m tests passed, [31m1[0m failed, [33m0[0m skipped (14 total tests)
