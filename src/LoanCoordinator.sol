@@ -16,7 +16,7 @@ uint256 constant SCALAR = 1e6;
 uint256 constant WAD = 1e18;
 
 /**
- * @title LoanCoordinator
+ * @title LoanCoordinator (v1)
  * @author mergd
  */
 contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
@@ -315,7 +315,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     // ============================================================================================
     // Functions: View
     // ============================================================================================
-
+    /// @inheritdoc ILoanCoordinator
     function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory _loan) {
         _loan = loans[_loanId];
 
@@ -326,6 +326,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
     }
 
+    /// @inheritdoc ILoanCoordinator
     function getAccruedInterest(Loan memory _loan) public view returns (uint256 _accrued) {
         Term memory _term = loanTerms[_loan.termId];
         uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
@@ -346,7 +347,13 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         _accrued = (block.timestamp - _loan.lastUpdateTime) * (_newIndex - _loan.userBorrowIndex);
     }
 
-    function getAuction(uint256 _auctionId) external view override returns (Auction memory auction) {
-        auction = auctions[_auctionId];
+    ///@inheritdoc ILoanCoordinator
+    function getTerms(uint256 _termId) external view returns (Term memory _term) {
+        _term = loanTerms[_termId];
+    }
+
+    /// @inheritdoc ILoanCoordinator
+    function getAuction(uint256 _auctionId) external view returns (Auction memory _auction) {
+        _auction = auctions[_auctionId];
     }
 }

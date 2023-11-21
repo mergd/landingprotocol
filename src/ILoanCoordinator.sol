@@ -176,7 +176,27 @@ interface ILoanCoordinator {
      */
     function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external;
 
-    function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory loan);
+    /**
+     * Get the details about a loan
+     * @param _loanId The ID of the loan
+     * @param _interest Whether to include pending interest or not
+     */
+    function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory _loan);
+    /**
+     * Calculate pending interest for a loan
+     * @param _loan The loan to get the accrued interest for
+     */
+    function getAccruedInterest(Loan memory _loan) external view returns (uint256 _accrued);
 
-    function getAuction(uint256 _auctionId) external view returns (Auction memory auction);
+    /**
+     * Get the details about a term
+     * @param _termId The ID of the term
+     */
+    function getTerms(uint256 _termId) external view returns (Term memory _term);
+
+    /**
+     * Get auction details
+     * @param _auctionId the ID of the auction
+     */
+    function getAuction(uint256 _auctionId) external view returns (Auction memory _auction);
 }
