@@ -9,7 +9,7 @@ import {Borrower} from "./Borrower.sol";
 import "@solmate/utils/SafeCastLib.sol";
 import "prb-math/UD60x18.sol";
 import "./ILoanCoordinator.sol";
-import "forge-std/Console2.sol";
+import "forge-std/console2.sol";
 
 uint256 constant SCALAR = 1e6;
 uint256 constant WAD = 1e18;
@@ -17,7 +17,7 @@ uint256 constant WAD = 1e18;
  * @dev Helper function to calculate interest – uses continually compound interest formula
  */
 
-function calculateInterest(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
+function calcFixedCompound(uint256 _interestRate, uint256 _debtAmount, uint256 _startTime, uint256 _endTime)
     pure
     returns (uint256 interest)
 {
@@ -34,10 +34,10 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     using SafeCastLib for uint256;
 
     //State
-    uint256 public loanCount;
+    uint256 public loanCount = 1;
     Auction[] public auctions;
     Term[] public loanTerms;
-    uint24[5] public durations = [0, 8 hours, 1 days, 2 days, 7 days];
+    uint256 public constant MAX_INTEREST_RATE = WAD * 10; // Max interest rate is 10_000%
     mapping(uint256 loanId => uint256 auctionId) public loanIdToAuction;
     mapping(uint256 loanId => Loan loan) public loans;
     mapping(address borrower => uint256[] loanIds) public borrowerLoans;
@@ -47,7 +47,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
     constructor() {
         // Create initial term
-        Term memory _term = Term(0, 0);
+        Term memory _term = Term(0, 0, uint40(block.timestamp), 0, ICoordRateCalculator(address(0)));
         loanTerms.push(_term);
         emit TermsSet(0, _term);
     }
@@ -68,8 +68,14 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         uint256 _terms,
         bytes calldata _data
     ) external returns (uint256) {
+        LoanState _state;
+        if (loanTerms[_terms].rateCalculator != ICoordRateCalculator(address(0))) _state = LoanState.VariableBorrow;
+        else _state = LoanState.StableBorrow;
+
         Loan memory _loan = Loan(
+            _state,
             0,
+            uint24(_terms),
             _borrower,
             _lender,
             false,
@@ -77,23 +83,29 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             _collateralAmount.safeCastTo96(),
             _debt,
             _debtAmount.safeCastTo96(),
-            _interestRate.safeCastTo128(),
+            _interestRate.safeCastTo64(),
             0,
-            durations[_duration],
-            uint40(_terms)
+            0,
+            0
         );
         return createLoan(_loan, _data);
     }
 
     /// @inheritdoc ILoanCoordinator
     function createLoan(Loan memory _loan, bytes calldata _data) public nonReentrant returns (uint256 _tokenId) {
-        if (_loan.duration == type(uint256).max) {
-            revert Coordinator_InvalidDuration();
-        }
-        loanCount++;
+        if (_loan.state == LoanState.Liquidating) revert Coordinator_InvalidTerms();
+        if (_loan.interestRate > MAX_INTEREST_RATE) revert Coordinator_InterestRateTooHigh();
+
+        uint64 _baseBorrowIndex = 0;
+        if (_loan.state == LoanState.VariableBorrow) _baseBorrowIndex = accrueTermIndex(_loan.termId);
+
+        ++loanCount;
         _tokenId = loanCount;
+
         Loan memory _newLoan = Loan(
-            uint96(_tokenId),
+            _loan.state,
+            uint48(_tokenId),
+            _loan.termId,
             _loan.borrower,
             _loan.lender,
             Lender(_loan.lender).callback(),
@@ -102,9 +114,9 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             _loan.debtToken,
             _loan.debtAmount,
             _loan.interestRate,
-            uint64(block.timestamp),
-            _loan.duration,
-            _loan.terms
+            _baseBorrowIndex,
+            uint40(block.timestamp),
+            uint40(block.timestamp)
         );
 
         loans[_tokenId] = _newLoan;
@@ -124,27 +136,50 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit LoanCreated(_tokenId, _newLoan);
     }
 
+    function accrueTermIndex(uint256 _termId) public returns (uint64 accuumulator) {
+        Term storage _term = loanTerms[_termId];
+        // Loan is variable rate
+        if (_term.lastUpdateTime != block.timestamp) {
+            uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
+            uint256 _rate = _term.rateCalculator.getNewRate(_termId, _timeElapsed);
+            uint256 _newIndex = (_term.baseBorrowIndex * _rate) / WAD;
+
+            _term.baseBorrowIndex += _newIndex.safeCastTo64();
+            _term.lastUpdateTime = uint40(block.timestamp);
+        }
+
+        return _term.baseBorrowIndex;
+    }
+
     ///@inheritdoc ILoanCoordinator
     function liquidateLoan(uint256 _loanId) external returns (uint256 _auctionId) {
         Loan memory _loan = loans[_loanId];
-        Term memory _terms = loanTerms[_loan.terms];
+        Term memory _terms = loanTerms[_loan.termId];
         console2.log("liquidateLoan");
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
 
-        if (
-            _loan.duration + _loan.startingTime > block.timestamp || _loan.duration == type(uint24).max // Auction in liquidation
-        ) revert Coordinator_LoanNotLiquidatable();
+        if (_loan.state == LoanState.Liquidating) revert Coordinator_LoanNotLiquidatable();
 
         console2.log("liquidateLoan");
-        uint256 interest = calculateInterest(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
+        uint256 _interest;
+        if (_loan.state == LoanState.StableBorrow) {
+            _interest = calcFixedCompound(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
+        } else {
+            // Update the loan if there is interest to be accrued
+            uint64 _baseBorrowIndex = accrueTermIndex(_loan.termId);
+            _interest = (block.timestamp - _loan.lastUpdateTime) * (_baseBorrowIndex - _loan.userBorrowIndex);
+            loanTerms[_loan.termId].lastUpdateTime = uint40(block.timestamp);
+            loanTerms[_loan.termId].baseBorrowIndex = _baseBorrowIndex;
+        }
         console2.log("liquidateLoan");
-        uint96 totalDebt = uint96(((_loan.debtAmount + interest) * _terms.liquidationBonus) / SCALAR);
+        uint96 totalDebt = uint96(((_loan.debtAmount + _interest) * _terms.liquidationBonus) / SCALAR);
 
         // Skip auction if auction period is set to 0
         if (!(_terms.auctionLength == 0)) {
             console2.log("auction called");
-            _startAuction(uint96(_loanId), totalDebt, _terms.auctionLength);
-            loans[_loanId].duration = type(uint24).max; // Auction off _loan
+            _startAuction(uint48(_loanId), totalDebt, _terms.auctionLength);
+
+            _loan.state = LoanState.Liquidating;
             _auctionId = auctions.length - 1;
         } else {
             console2.log("auction not called");
@@ -164,45 +199,37 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     }
 
     /// @inheritdoc ILoanCoordinator
-    function repayLoan(uint256 _loanId) public nonReentrant {
-        Loan memory loan = loans[_loanId];
-        uint256 interest = calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
-        uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtToken.safeTransferFrom(msg.sender, loan.lender, totalDebt);
+    function repayLoan(uint256 _loanId, address _from) public nonReentrant {
+        Loan memory _loan = loans[_loanId];
+        uint256 _interest = calcFixedCompound(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
+        uint256 _totalDebt = _loan.debtAmount + _interest;
+        _loan.debtToken.safeTransferFrom(_from, _loan.lender, _totalDebt);
 
-        if (loan.callback && Lender(loan.lender).loanRepaidHook(loan) != Lender.loanRepaidHook.selector) {
+        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan) != Lender.loanRepaidHook.selector) {
             revert Coordinator_LenderUpdateFailed();
         }
 
-        deleteLoan(_loanId, loan.borrower);
-        // Delete corresponding liquidation if the loan is repaid
-        if (loan.duration == type(uint256).max) {
-            delete auctions[loanIdToAuction[_loanId]];
-        }
+        deleteLoan(_loanId, _loan.borrower);
 
-        emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
+        // Delete corresponding auction if the _loan is repaid
+        if (_loan.state == LoanState.Liquidating) delete auctions[loanIdToAuction[_loanId]];
+
+        emit LoanRepaid(_loanId, _loan.borrower, _loan.lender, _totalDebt);
     }
 
     /// @inheritdoc ILoanCoordinator
     function rebalanceRate(uint256 _loanId, uint256 _newRate) external nonReentrant returns (uint256 _interest) {
         Loan storage _loan = loans[_loanId];
+
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
-
-        if (
-            _loan.duration == type(uint256).max // Loan is in liquidation
-                || _loan.duration + _loan.startingTime > block.timestamp
-        ) revert Coordinator_LoanNotAdjustable();
-
-        // Add a check to prevent rate from being too high, or as long as it's lower than the existing rate – maximum rate is 1000% APY
-        if (_newRate >= WAD * 10 || (_newRate >= WAD * 10 && _newRate > _loan.interestRate)) {
-            revert Coordinator_InterestRateTooHigh();
-        }
+        if (_newRate >= MAX_INTEREST_RATE) revert Coordinator_InterestRateTooHigh();
+        if (_loan.state != LoanState.StableBorrow) revert Coordinator_LoanNotAdjustable();
 
         // Calculate the accrued interest
-        _interest = calculateInterest(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
+        _interest = calcFixedCompound(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
         _loan.debtAmount = _loan.debtAmount + _interest.safeCastTo96(); // Recalculate debt amount
-        _loan.startingTime = uint64(block.timestamp); // Reset starting time
-        _loan.interestRate = uint128(_newRate);
+        _loan.startingTime = uint40(block.timestamp); // Reset starting time
+        _loan.interestRate = uint64(_newRate);
 
         // Borrower Hook
         if (isContract(_loan.borrower)) {
@@ -218,7 +245,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     // Functions: Auctions
     // ============================================================================================
 
-    function _startAuction(uint96 _loanId, uint96 _debtAmount, uint24 _auctionLength) internal {
+    function _startAuction(uint48 _loanId, uint96 _debtAmount, uint24 _auctionLength) internal {
         Auction memory newAuction = Auction(_loanId, _debtAmount, _auctionLength, uint40(block.timestamp));
         auctions.push(newAuction);
         emit AuctionCreated(newAuction);
@@ -244,6 +271,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         _loan.debtToken.safeTransferFrom(msg.sender, address(this), _bidAmount);
         _loan.collateralToken.safeTransfer(msg.sender, _collateralAmt);
         _loan.debtToken.safeTransfer(_loan.lender, _bidAmount);
+
         if (_borrowerReturn > 0) {
             _loan.collateralToken.safeTransfer(_loan.borrower, _borrowerReturn);
         }
@@ -259,6 +287,9 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
                 emit BorrowerNotified(_auction.loanId);
             } catch {}
         }
+
+        // Accrue pair information
+        if (_loan.state == LoanState.VariableBorrow) accrueTermIndex(_loan.termId);
 
         emit AuctionSettled(_auctionId, msg.sender, _bidAmount);
     }
@@ -340,16 +371,27 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     // Functions: View
     // ============================================================================================
 
-    function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory loan) {
-        loan = loans[_loanId];
+    function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory _loan) {
+        _loan = loans[_loanId];
 
         // Account for pending interest for this loan
-        if (_interest) {
-            loan.debtAmount +=
-                uint96(calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp));
-        }
+        if (_interest) _loan.debtAmount += uint96(getAccruedInterest(_loan));
+
         // Loan doesn't exist
-        if (loan.borrower == address(0)) revert Coordinator_InvalidLoan();
+        if (_loan.borrower == address(0)) revert Coordinator_InvalidLoan();
+    }
+
+    function getAccruedInterest(Loan memory _loan) public view returns (uint256 _accrued) {
+        // Check loan type
+        if (_loan.state == LoanState.StableBorrow) {
+            _accrued = calcFixedCompound(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
+        } else if (_loan.state == LoanState.VariableBorrow) {
+            Term memory _term = loanTerms[_loan.termId];
+            uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
+            uint256 _rate = _term.rateCalculator.getNewRate(_loan.termId, _timeElapsed);
+            uint256 _newIndex = (_term.baseBorrowIndex * _rate) / WAD;
+            _accrued = (block.timestamp - _loan.lastUpdateTime) * (_newIndex - _loan.userBorrowIndex);
+        }
     }
 
     function viewBorrowerLoans(address _borrower) external view returns (uint256[] memory loanList) {
