@@ -139,7 +139,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
             loans[_loanId].state = LoanState.Liquidating;
             _auctionId = auctions.length - 1;
-            loans[_loanId].status = LoanStatus.Liquidating;
+            loans[_loanId].state = LoanState.Liquidating;
         } else {
             console2.log("auction not called");
             deleteLoan(_loanId, _loan.borrower);

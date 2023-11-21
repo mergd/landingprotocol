@@ -15,13 +15,6 @@ contract Deploy is Script {
         vm.startBroadcast();
         loanCoordinator = new LoanCoordinator();
         console2.log("Deployed LoanCoordinator at address: ", address(loanCoordinator));
-
-        // LenderRegistry lenderRegistry = new LenderRegistry(
-        //     loanCoordinator,
-        //     address(this)
-        // );
-        // console2.log("Deployed Lender Registry at address: ", address(lenderRegistry));
-
         MockERC20 debtToken = new MockERC20("Debt Token", "DEBT", 18);
         console2.log("Deployed Debt Token at address: ", address(debtToken));
 
