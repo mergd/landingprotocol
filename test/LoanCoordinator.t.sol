@@ -3,7 +3,8 @@ pragma solidity ^0.8.17;
 
 import "forge-std/Test.sol";
 
-import {LoanCoordinator, ILoanCoordinator} from "src/LoanCoordinator.sol";
+import {LoanCoordinator, ILoanCoordinator, ICoordRateCalculator} from "src/LoanCoordinator.sol";
+import {MockRateCalc} from "./mocks/MockRateCalculator.sol";
 import {MockLender} from "./mocks/MockLender.sol";
 import "./mocks/MockERC20.sol";
 import {MockBorrower} from "./mocks/MockBorrower.sol";
@@ -12,6 +13,7 @@ contract LoanCoordinatorTest is Test {
     LoanCoordinator coordinator;
     MockERC20 _collateral;
     MockERC20 _debt;
+    MockRateCalc _rateCalc;
     address _borrower;
     address _borrowerContract;
     address _liquidator = address(0x2);
@@ -19,12 +21,16 @@ contract LoanCoordinatorTest is Test {
     uint256 termSet;
 
     function setUp() external {
+        _rateCalc = new MockRateCalc(1e14); // 8 % a day
         coordinator = new LoanCoordinator();
         ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(
             1.005 * 1e6, // Liquidation bonus
-            100 // Auction duration
+            100, // Auction duration
+            0,
+            0,
+            _rateCalc
         );
-        termSet = coordinator.setTerms(_term);
+        termSet = coordinator.setTerms(_term, 0);
         _collateral = new MockERC20("COLLATERAL", "COLLATERAL TOKEN", 18);
         _debt = new MockERC20("DEBT", "DEBT TOKEN", 18);
         _lender = new MockLender(coordinator, _debt);
@@ -38,7 +44,7 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(_borrower, 1e18);
 
         vm.startPrank(_borrower);
-        coordinator.createLoan(_borrower, address(_lender), _collateral, _debt, 1e18, 1e18, 0.1 * 1e6, termSet, "");
+        coordinator.createLoan(_borrower, address(_lender), _collateral, _debt, 1e18, 1e18, termSet, "");
         assertEq(_debt.balanceOf(_borrower), 1e18);
     }
 
@@ -90,7 +96,13 @@ contract LoanCoordinatorTest is Test {
         (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd);
         assertLt(bidAmt, 1e18);
         assertEq(collateralAmt, 1e18);
-        // assertEq(collateralAmt, 1e18);
+
+        coordinator.accrueBorrowIndex(_termSet);
+        (uint256 bidAmt1, uint256 collateralAmt1) = coordinator.getCurrentPrice(liqd);
+        // Accruing interest doesn't affect the loan execution
+        assertEq(bidAmt1, bidAmt);
+        assertEq(collateralAmt1, collateralAmt);
+
         borrowMintAndApprove(address(1), 1e18);
 
         console2.log("Auction Price", bidAmt);
@@ -101,33 +113,60 @@ contract LoanCoordinatorTest is Test {
     // Test reclaim
 
     function testBid3() public {
+        // Create variable rate loan
         uint256 _termSet = createTerm(1.5 * 1e6, 100);
         uint256 _loan = createLoan(_borrower, 0.5 * 1e6, _termSet);
 
+        // Create a fixed rate loan
+        uint256 _fixedTerm = createTermFixed(1.5 * 1e6, 100, 1e14);
+        uint256 _loan1 = createLoan(_borrower, 0.5 * 1e6, _fixedTerm);
+
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
-        vm.warp(block.timestamp + 100);
-        (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd);
-        assertEq(bidAmt, 0);
-        assertEq(collateralAmt, 0);
-        borrowMintAndApprove(address(1), bidAmt);
+        vm.expectRevert(); // Loan Already undergoing liquidation
+        _lender.liquidate(_loan);
 
-        console2.log("Auction Price", bidAmt);
-        console2.log("Coll amt Price", collateralAmt);
+        // liquidate the fixed rate loan
+        uint256 liqd0 = _lender.liquidate(_loan1);
+
+        vm.warp(block.timestamp + 100);
+        {
+            (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd);
+            assertEq(bidAmt, 0);
+            assertEq(collateralAmt, 0);
+            borrowMintAndApprove(address(1), bidAmt);
+
+            console2.log("Auction Price", bidAmt);
+            console2.log("Coll amt Price", collateralAmt);
+        }
+        {
+            // Liquidate the fixed rate loan
+            (uint256 bidAmt, uint256 collateralAmt) = coordinator.getCurrentPrice(liqd0);
+            assertEq(bidAmt, 0);
+            assertEq(collateralAmt, 0);
+            borrowMintAndApprove(address(1), bidAmt);
+
+            console2.log("Auction Price", bidAmt);
+            console2.log("Coll amt Price", collateralAmt);
+        }
         vm.startPrank(address(1));
         // Auction has failed to clear
         vm.expectRevert();
         coordinator.bid(0);
+        vm.expectRevert();
+        coordinator.bid(1);
 
         // Reclaim
         _lender.reclaim(0);
-        // Collateral sent to lender
+        _lender.reclaim(1);
 
-        assertEq(_collateral.balanceOf(address(_lender)), 1e18);
+        // Collateral for both sent to lender
+        assertEq(_collateral.balanceOf(address(_lender)), 2e18);
     }
 
     function testLoanNoAuction() public {
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0);
+        uint256 _term = createTerm(1.5 * 1e6, 0);
+        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, _term);
 
         vm.startPrank(address(_lender));
         _lender.liquidate(loanId);
@@ -135,38 +174,41 @@ contract LoanCoordinatorTest is Test {
         assertEq(1e18, _collateral.balanceOf(address(_lender)));
     }
 
-    function testRebalanceRate() public {
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0);
-
-        vm.warp(8 hours + 1);
-        uint256 _amount = _lender.rebalanceRate(loanId, 0.2 * 1e6);
-        console2.log("Realized interest from principal", _amount);
-        // Add some checks here
-    }
-
     function testRepay() public {
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0);
-
-        borrowMintAndApprove(_borrower, 1.01 * 1e18);
-        vm.startPrank(_borrower);
-        coordinator.repayLoan(loanId);
-    }
-
-    function testRepayWhileAuction() public {
         uint256 _term = createTerm(1.5 * 1e6, 10);
         uint256 loanId = createLoan(_borrower, 0.5 * 1e6, _term);
 
         borrowMintAndApprove(_borrower, 1.01 * 1e18);
         vm.startPrank(_borrower);
-        _lender.liquidate(loanId);
-        vm.warp(block.timestamp + 1);
-        // Borrower should still be able to repay
-        coordinator.repayLoan(loanId);
+        coordinator.repayLoan(loanId, _borrower);
+    }
+
+    function testRepayWhileAuction() public {
+        uint256 _fixedRateTerm = createTermFixed(1.5 * 1e6, 10, 1e14);
+        uint256 loanId0 = createLoan(_borrower, 0.5 * 1e6, _fixedRateTerm);
+
+        uint256 _term = createTerm(1.5 * 1e6, 10);
+        uint256 loanId1 = createLoan(_borrower, 0.5 * 1e6, _term);
+        {
+            // allow for some time to accrue interest
+            vm.startPrank(_borrower);
+            _lender.liquidate(loanId1);
+            vm.warp(block.timestamp + 10);
+        }
+        borrowMintAndApprove(_borrower, 1e18);
+        // Interest has accrued even though auction is still live – so paying just principal should revert
+        vm.expectRevert();
+        coordinator.repayLoan(loanId1, _borrower);
+        vm.expectRevert();
+        coordinator.repayLoan(loanId0, _borrower);
+
+        // Repay loan with interest
+        borrowMintAndApprove(_borrower, 10e18);
+        coordinator.repayLoan(loanId1, _borrower);
+        coordinator.repayLoan(loanId0, _borrower);
     }
 
     function testInvalidTerms() public {
-        vm.expectRevert();
-        createTerm(1.5 * 1e6, 0);
         vm.expectRevert();
         createTerm(2e7, 10);
     }
@@ -182,10 +224,55 @@ contract LoanCoordinatorTest is Test {
         MockBorrower(_borrowerContract).getFlashloan(false, _collateral);
     }
 
+    function testGetLoan() public {
+        uint256 _term = createTerm(1.5 * 1e6, 10);
+        uint256 _fixedTerm = createTermFixed(1.5 * 1e6, 10, 1e14);
+        uint256 _loan0 = createLoan(_borrower, 0.5 * 1e6, _fixedTerm);
+        uint256 _loan1 = createLoan(_borrower, 0.5 * 1e6, _term);
+
+        ILoanCoordinator.Loan memory loan0 = coordinator.getLoan(_loan0, false);
+        ILoanCoordinator.Loan memory loan1 = coordinator.getLoan(_loan1, false);
+        vm.warp(block.timestamp + 1000);
+        _rateCalc.setRate(1e18);
+        coordinator.accrueBorrowIndex(_term);
+        coordinator.accrueBorrowIndex(_fixedTerm);
+        vm.warp(block.timestamp + 1000);
+
+        ILoanCoordinator.Loan memory loan0_ = coordinator.getLoan(_loan0, true);
+        ILoanCoordinator.Loan memory loan1_ = coordinator.getLoan(_loan1, true);
+
+        assertGt(loan0_.debtAmount, loan0.debtAmount);
+        assertGt(loan1_.debtAmount, loan1.debtAmount);
+
+        // Call rate accumulator
+        coordinator.accrueBorrowIndex(_term);
+        coordinator.accrueBorrowIndex(_fixedTerm);
+
+        ILoanCoordinator.Loan memory loan0__ = coordinator.getLoan(_loan0, true);
+        ILoanCoordinator.Loan memory loan1__ = coordinator.getLoan(_loan1, true);
+        // Should still be the same
+        assertEq(loan0_.debtAmount, loan0__.debtAmount);
+        assertEq(loan1_.debtAmount, loan1__.debtAmount);
+
+        // Check the debtAmount calc is correct
+        uint256 _balance = _debt.balanceOf(_borrower);
+        borrowMintAndApprove(_borrower, loan0__.debtAmount);
+        coordinator.repayLoan(_loan0, _borrower);
+        // Can't repay the same loan twice
+        vm.expectRevert();
+        coordinator.repayLoan(_loan0, _borrower);
+        assertEq(_debt.balanceOf(_borrower), _balance);
+
+        // Repay the variable rate loan
+        borrowMintAndApprove(_borrower, loan1__.debtAmount);
+        coordinator.repayLoan(_loan1, _borrower);
+        assertEq(_debt.balanceOf(_borrower), _balance);
+    }
+
     /* -------------------------------------------------------------------------- */
     /*                                 Test Utils                                 */
     /* -------------------------------------------------------------------------- */
-    function createLoan(address borrowAddress, uint256 rate, uint256 terms) public returns (uint256) {
+    function createLoan(address borrowAddress, uint256, uint256 terms) public returns (uint256) {
         vm.startPrank(borrowAddress);
         uint256 _borrowAmt = 1e18;
         uint256 _collateralAmt = 1e18;
@@ -193,7 +280,7 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(borrowAddress, _collateralAmt);
         _debt.mint(address(_lender), _borrowAmt);
         return coordinator.createLoan(
-            borrowAddress, address(_lender), _collateral, _debt, _collateralAmt, _borrowAmt, rate, terms, ""
+            borrowAddress, address(_lender), _collateral, _debt, _collateralAmt, _borrowAmt, terms, ""
         );
     }
 
@@ -210,7 +297,24 @@ contract LoanCoordinatorTest is Test {
     }
 
     function createTerm(uint256 bonus, uint256 duration) public returns (uint256) {
-        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(uint24(bonus), uint24(duration));
-        return coordinator.setTerms(_term);
+        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(
+            uint24(bonus), // Liquidation bonus
+            uint24(duration), // Auction duration
+            0,
+            0,
+            _rateCalc
+        );
+        return coordinator.setTerms(_term, 0);
+    }
+
+    function createTermFixed(uint256 bonus, uint256 duration, uint256 rate) public returns (uint256) {
+        ILoanCoordinator.Term memory _term = ILoanCoordinator.Term(
+            uint24(bonus), // Liquidation bonus
+            uint24(duration), // Auction duration
+            0,
+            0,
+            ICoordRateCalculator(address(0))
+        );
+        return coordinator.setTerms(_term, rate);
     }
 }

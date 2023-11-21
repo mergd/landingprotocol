@@ -2,11 +2,15 @@
 pragma solidity ^0.8.22;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
+import {ICoordRateCalculator} from "src/ICoordRateCalculator.sol";
+import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
 
 interface ILoanCoordinator {
     // 5 words
     struct Loan {
-        uint96 id;
+        LoanState state;
+        uint48 id;
+        uint24 termId;
         address borrower;
         // 1 word
         address lender;
@@ -18,26 +22,29 @@ interface ILoanCoordinator {
         ERC20 debtToken;
         uint96 debtAmount;
         // 4 words
-        uint64 interestRate;
-        uint64 startingTime;
-        uint40 terms;
-        LoanStatus status;
+        uint64 userBorrowIndex;
+        uint40 lastUpdateTime;
     }
 
+    /// @dev Rate Calculator is immutable – can move to a new term though
+    // 1 word
     struct Term {
         uint24 liquidationBonus;
         uint24 auctionLength;
+        uint40 lastUpdateTime;
+        uint64 baseBorrowIndex;
+        ICoordRateCalculator rateCalculator;
     }
 
     // 1 word
     struct Auction {
-        uint96 loanId;
+        uint48 loanId;
         uint96 recoveryAmount;
         uint24 duration;
         uint40 startTime;
     }
 
-    enum LoanStatus {
+    enum LoanState {
         Inactive,
         Active,
         Liquidating
@@ -94,7 +101,6 @@ interface ILoanCoordinator {
      * @param _debt ERC20 debt token
      * @param _collateralAmount the amount of collateral, denominated in _collateral
      * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan, scaled by WAD (compounding)
      * @param _terms terms of the loan
      * @param _data data to be passed to the lender contract
      * @return _tokenId the loan id
@@ -106,7 +112,6 @@ interface ILoanCoordinator {
         ERC20 _debt,
         uint256 _collateralAmount,
         uint256 _debtAmount,
-        uint256 _interestRate,
         uint256 _terms,
         bytes calldata _data
     ) external returns (uint256);
@@ -117,7 +122,7 @@ interface ILoanCoordinator {
      */
     function createLoan(Loan memory _loan, bytes calldata _data) external returns (uint256);
     /**
-     * @dev Initiate a dutch auction to liquidate the laon
+     * @dev Initiate a dutch auction to liquidate the loan
      * @param _loanId the loan to liquidate
      * @return _auctionId auction id
      */
@@ -125,18 +130,21 @@ interface ILoanCoordinator {
     /**
      * Repay the loan
      * @param _loanId LoanId to repay
+     * @param _from Address to repay from
      */
-    function repayLoan(uint256 _loanId) external;
+    function repayLoan(uint256 _loanId, address _from) external;
+
     /**
-     * @dev Rebalance the interest rate, and realize accrued interest as principal
-     * @param _loanId the loan to rebalance
-     * @param _newRate the new rate
-     * @return _interest realized amount
+     * @dev Accrue the borrow index for a term
+     * @param _termId the term to accrue
+     * @return _borrowIndex the new borrow index
      */
-    function rebalanceRate(uint256 _loanId, uint256 _newRate) external returns (uint256 _interest);
+    function accrueBorrowIndex(uint256 _termId) external returns (uint64);
+
     /**
      * @dev Settle the auction based on the current price
      * @param _auctionId the auction to bid on
+     * @notice Unless loan is repaid, no additional interest is accounted for in the liquidation period
      */
     function bid(uint256 _auctionId) external;
     /**
@@ -155,17 +163,18 @@ interface ILoanCoordinator {
     /**
      * @dev Set the terms of the loan
      * @param _terms the terms to set
+     * @param _rate If the RateCalc is set to 0, the rate will be set to this
      */
-    function setTerms(Term memory _terms) external returns (uint256);
+    function setTerms(Term memory _terms, uint256 _rate) external returns (uint256);
 
     /**
      * Get a flashloan
-     * @param _borrower Callback address
+     * @param _receiver Callback address
      * @param _token Token to borrow
      * @param _amount Amount
      * @param _data Data to pass in callback
      */
-    function getFlashLoan(address _borrower, ERC20 _token, uint256 _amount, bytes memory _data) external;
+    function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external;
 
     function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory loan);
 
