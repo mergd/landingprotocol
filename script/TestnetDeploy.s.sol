@@ -12,7 +12,9 @@ contract Deploy is Script {
     function test() public {}
 
     function run() external returns (LoanCoordinator loanCoordinator) {
-        vm.startBroadcast();
+        uint256 deployer_key = vm.envUint("DEPLOYER_KEY");
+
+        vm.startBroadcast(deployer_key);
         loanCoordinator = new LoanCoordinator();
         console2.log("Deployed LoanCoordinator at address: ", address(loanCoordinator));
         MockERC20 debtToken = new MockERC20("Debt Token", "DEBT", 18);
