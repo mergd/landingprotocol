@@ -33,12 +33,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
     // Lender loans should be tracked in lender contract
 
-    constructor() {
-        // Create initial term
-        Term memory _term = Term(0, 0, uint40(block.timestamp), 0, ICoordRateCalculator(address(0)));
-        loanTerms.push(_term);
-        emit TermsSet(0, _term);
-    }
+    constructor() {}
 
     // ============================================================================================
     // Functions: Lending
@@ -127,11 +122,13 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         // Update the loan if there is interest to be accrued
         uint64 _baseBorrowIndex = accrueBorrowIndex(_loan.termId);
         uint256 _interest = (block.timestamp - _loan.lastUpdateTime) * (_baseBorrowIndex - _loan.userBorrowIndex);
+        console2.log("liquidateLoan1");
         loanTerms[_loan.termId].lastUpdateTime = uint40(block.timestamp);
         loanTerms[_loan.termId].baseBorrowIndex = _baseBorrowIndex;
+        console2.log("liquidateLoan2");
 
-        console2.log("liquidateLoan");
         uint96 totalDebt = uint96(((_loan.debtAmount + _interest) * _terms.liquidationBonus) / SCALAR);
+        console2.log("liquidateLoan3");
 
         // Skip auction if auction period is set to 0
         if (!(_terms.auctionLength == 0)) {
@@ -177,8 +174,9 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         if (_term.lastUpdateTime != block.timestamp) {
             uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
             uint256 _rate = _term.rateCalculator.getNewRate(_termId, _timeElapsed);
+            console2.log("accrueBorrowIndex", _rate);
             uint256 _newIndex = (_term.baseBorrowIndex * _rate) / WAD;
-
+            console2.log("accrueBorrowIndex", _newIndex);
             _term.baseBorrowIndex += _newIndex.safeCastTo64();
             _term.lastUpdateTime = uint40(block.timestamp);
         }
