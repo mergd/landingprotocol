@@ -2,8 +2,8 @@
 pragma solidity ^0.8.22;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
-import {ICoordRateCalculator} from "src/ICoordRateCalculator.sol";
-import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
+import {ICoordRateCalculator} from "./ICoordRateCalculator.sol";
+import {IFlashloanReceiver} from "./IFlashloanReceiver.sol";
 
 interface ILoanCoordinator {
     // 5 words

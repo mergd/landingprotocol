@@ -3,7 +3,7 @@ pragma solidity ^0.8.17;
 
 import "forge-std/Test.sol";
 
-import {LoanCoordinator, ILoanCoordinator, ICoordRateCalculator} from "src/LoanCoordinator.sol";
+import {LoanCoordinator, ILoanCoordinator, ICoordRateCalculator} from "../src/LoanCoordinator.sol";
 import {MockRateCalc} from "./mocks/MockRateCalculator.sol";
 import {MockLender} from "./mocks/MockLender.sol";
 import "./mocks/MockERC20.sol";

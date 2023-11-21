@@ -4,9 +4,10 @@ pragma solidity ^0.8.22;
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
-import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
 import {SafeCastLib} from "@solmate/utils/SafeCastLib.sol";
 import {FixedPointMathLib} from "@solmate/utils/FixedPointMathLib.sol";
+
+import {IFlashloanReceiver} from "./IFlashloanReceiver.sol";
 import {Lender} from "./Lender.sol";
 import "./ILoanCoordinator.sol";
 import "forge-std/console2.sol";

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.17;
 
 import "src/LoanCoordinator.sol";
-import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
+import {IFlashloanReceiver} from "../../src/IFlashloanReceiver.sol";
 
 contract MockBorrower is IFlashloanReceiver {
     function test() public {}
