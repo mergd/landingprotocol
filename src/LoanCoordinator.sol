@@ -4,10 +4,10 @@ pragma solidity ^0.8.22;
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
-import {Lender} from "./Lender.sol";
-import "@solmate/utils/SafeCastLib.sol";
-import "./ILoanCoordinator.sol";
 import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
+import {SafeCastLib} from "@solmate/utils/SafeCastLib.sol";
+import {Lender} from "./Lender.sol";
+import "./ILoanCoordinator.sol";
 import "forge-std/console2.sol";
 
 uint256 constant SCALAR = 1e6;
@@ -120,9 +120,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         console2.log("liquidateLoan");
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
 
-        if (_loan.state == LoanState.Liquidating) {
-            revert Coordinator_LoanNotLiquidatable();
-        }
+        if (_loan.state == LoanState.Liquidating) revert Coordinator_LoanNotLiquidatable();
 
         console2.log("liquidateLoan");
 
@@ -286,7 +284,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     ///@inheritdoc ILoanCoordinator
     function setTerms(Term memory _term) external returns (uint256 _termId) {
         if (_term.liquidationBonus > SCALAR * 2 || _term.liquidationBonus < SCALAR) revert Coordinator_InvalidTerms();
-        if (_term.auctionLength > 30 days || _term.auctionLength == 0) revert Coordinator_InvalidTerms();
+        if (_term.auctionLength > 30 days) revert Coordinator_InvalidTerms();
         if (_term.rateCalculator == ICoordRateCalculator(address(0))) revert Coordinator_InvalidTerms();
 
         _termId = loanTerms.length;
