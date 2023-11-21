@@ -141,6 +141,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             console2.log("auction called");
             _startAuction(uint96(_loanId), totalDebt, _terms.auctionLength);
             _auctionId = auctions.length - 1;
+            loans[_loanId].status = LoanStatus.Liquidating;
         } else {
             console2.log("auction not called");
             deleteLoan(_loanId, _loan.borrower);
