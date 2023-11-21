@@ -166,7 +166,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         }
 
         // Interactions
-        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan) != Lender.loanRepaidHook.selector) {
+        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan, _totalDebt) != Lender.loanRepaidHook.selector)
+        {
             revert Coordinator_LenderUpdateFailed();
         }
         _loan.debtToken.safeTransferFrom(_from, _loan.lender, _totalDebt);

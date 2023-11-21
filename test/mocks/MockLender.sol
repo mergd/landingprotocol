@@ -23,7 +23,7 @@ contract MockLender is Lender {
         return Lender.auctionSettledHook.selector;
     }
 
-    function loanRepaidHook(ILoanCoordinator.Loan memory) external pure override returns (bytes4) {
+    function loanRepaidHook(ILoanCoordinator.Loan memory, uint256) external pure override returns (bytes4) {
         return Lender.loanRepaidHook.selector;
     }
 
