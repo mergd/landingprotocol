@@ -38,13 +38,13 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(_borrower, 1e18);
 
         vm.startPrank(_borrower);
-        coordinator.createLoan(_borrower, address(_lender), _collateral, _debt, 1e18, 1e18, 0.1 * 1e6, 1, termSet, "");
+        coordinator.createLoan(_borrower, address(_lender), _collateral, _debt, 1e18, 1e18, 0.1 * 1e6, termSet, "");
         assertEq(_debt.balanceOf(_borrower), 1e18);
     }
 
     function testReclaim() public {
         uint256 _termSet = createTerm(1.5 * 1e6, 10);
-        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, 0, _termSet);
+        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, _termSet);
         vm.warp(8 hours + 1);
 
         _lender.liquidate(_loan);
@@ -54,7 +54,7 @@ contract LoanCoordinatorTest is Test {
     }
 
     function testLiquidate() public {
-        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, 0, 0);
+        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, 0);
 
         vm.warp(8 hours + 1);
         _lender.liquidate(_loan);
@@ -63,7 +63,7 @@ contract LoanCoordinatorTest is Test {
     // Test when the a descending amount of collateral is offered
     function testBid1() public {
         uint256 _termSet = createTerm(1.5 * 1e6, 100);
-        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, 0, _termSet);
+        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, _termSet);
 
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
@@ -82,7 +82,7 @@ contract LoanCoordinatorTest is Test {
     function testBid2() public {
         uint256 _termSet = createTerm(1.5 * 1e6, 100);
 
-        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, 0, _termSet);
+        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, _termSet);
 
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
@@ -102,7 +102,7 @@ contract LoanCoordinatorTest is Test {
 
     function testBid3() public {
         uint256 _termSet = createTerm(1.5 * 1e6, 100);
-        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, 0, _termSet);
+        uint256 _loan = createLoan(_borrower, 0.5 * 1e6, _termSet);
 
         vm.warp(1 days + 1);
         uint256 liqd = _lender.liquidate(_loan);
@@ -127,7 +127,7 @@ contract LoanCoordinatorTest is Test {
     }
 
     function testLoanNoAuction() public {
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0, 0);
+        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0);
 
         vm.startPrank(address(_lender));
         _lender.liquidate(loanId);
@@ -136,7 +136,7 @@ contract LoanCoordinatorTest is Test {
     }
 
     function testRebalanceRate() public {
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0, 0);
+        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0);
 
         vm.warp(8 hours + 1);
         uint256 _amount = _lender.rebalanceRate(loanId, 0.2 * 1e6);
@@ -145,7 +145,7 @@ contract LoanCoordinatorTest is Test {
     }
 
     function testRepay() public {
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0, 0);
+        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0);
 
         borrowMintAndApprove(_borrower, 1.01 * 1e18);
         vm.startPrank(_borrower);
@@ -154,7 +154,7 @@ contract LoanCoordinatorTest is Test {
 
     function testRepayWhileAuction() public {
         uint256 _term = createTerm(1.5 * 1e6, 10);
-        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, 0, _term);
+        uint256 loanId = createLoan(_borrower, 0.5 * 1e6, _term);
 
         borrowMintAndApprove(_borrower, 1.01 * 1e18);
         vm.startPrank(_borrower);
@@ -172,7 +172,7 @@ contract LoanCoordinatorTest is Test {
     }
 
     function testFlashLoan() public {
-        createLoan(_borrower, 0.5 * 1e6, 0, 0);
+        createLoan(_borrower, 0.5 * 1e6, 0);
         MockBorrower(_borrowerContract).getFlashloan(true, _collateral);
     }
 
@@ -185,10 +185,7 @@ contract LoanCoordinatorTest is Test {
     /* -------------------------------------------------------------------------- */
     /*                                 Test Utils                                 */
     /* -------------------------------------------------------------------------- */
-    function createLoan(address borrowAddress, uint256 rate, uint256 duration, uint256 terms)
-        public
-        returns (uint256)
-    {
+    function createLoan(address borrowAddress, uint256 rate, uint256 terms) public returns (uint256) {
         vm.startPrank(borrowAddress);
         uint256 _borrowAmt = 1e18;
         uint256 _collateralAmt = 1e18;
@@ -196,7 +193,7 @@ contract LoanCoordinatorTest is Test {
         collateralmintAndApprove(borrowAddress, _collateralAmt);
         _debt.mint(address(_lender), _borrowAmt);
         return coordinator.createLoan(
-            borrowAddress, address(_lender), _collateral, _debt, _collateralAmt, _borrowAmt, rate, duration, terms, ""
+            borrowAddress, address(_lender), _collateral, _debt, _collateralAmt, _borrowAmt, rate, terms, ""
         );
     }
 

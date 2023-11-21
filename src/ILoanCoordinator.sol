@@ -8,16 +8,20 @@ interface ILoanCoordinator {
     struct Loan {
         uint96 id;
         address borrower;
+        // 1 word
         address lender;
         bool callback;
+        // 2 words
         ERC20 collateralToken;
         uint96 collateralAmount;
+        // 3 words
         ERC20 debtToken;
         uint96 debtAmount;
-        uint128 interestRate;
+        // 4 words
+        uint64 interestRate;
         uint64 startingTime;
-        uint24 duration;
         uint40 terms;
+        LoanStatus status;
     }
 
     struct Term {
@@ -33,12 +37,16 @@ interface ILoanCoordinator {
         uint40 startTime;
     }
 
+    enum LoanStatus {
+        Inactive,
+        Active,
+        Liquidating
+    }
+
     /* -------------------------------------------------------------------------- */
     /*                                    State                                   */
     /* -------------------------------------------------------------------------- */
     function loanCount() external view returns (uint256);
-
-    function durations(uint256 index) external view returns (uint24);
 
     function loanIdToAuction(uint256 loanId) external view returns (uint256);
 
@@ -87,7 +95,6 @@ interface ILoanCoordinator {
      * @param _collateralAmount the amount of collateral, denominated in _collateral
      * @param _debtAmount the amount of debt denominated in _debt
      * @param _interestRate the APR on the loan, scaled by WAD (compounding)
-     * @param _duration index of the duration array
      * @param _terms terms of the loan
      * @param _data data to be passed to the lender contract
      * @return _tokenId the loan id
@@ -100,7 +107,6 @@ interface ILoanCoordinator {
         uint256 _collateralAmount,
         uint256 _debtAmount,
         uint256 _interestRate,
-        uint256 _duration,
         uint256 _terms,
         bytes calldata _data
     ) external returns (uint256);

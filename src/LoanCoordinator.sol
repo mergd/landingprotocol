@@ -5,7 +5,7 @@ import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
 import {Lender} from "./Lender.sol";
-import {Borrower} from "./Borrower.sol";
+import {IFlashLoanReceiver} from "./IFlashLoanReceiver.sol";
 import "@solmate/utils/SafeCastLib.sol";
 import "prb-math/UD60x18.sol";
 import "./ILoanCoordinator.sol";
@@ -34,10 +34,10 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     using SafeCastLib for uint256;
 
     //State
+    uint256 public constant MAX_INTEREST_RATE = WAD * 10;
     uint256 public loanCount;
     Auction[] public auctions;
     Term[] public loanTerms;
-    uint24[5] public durations = [0, 8 hours, 1 days, 2 days, 7 days];
     mapping(uint256 loanId => uint256 auctionId) public loanIdToAuction;
     mapping(uint256 loanId => Loan loan) public loans;
     mapping(address borrower => uint256[] loanIds) public borrowerLoans;
@@ -64,7 +64,6 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         uint256 _collateralAmount,
         uint256 _debtAmount,
         uint256 _interestRate,
-        uint256 _duration,
         uint256 _terms,
         bytes calldata _data
     ) external returns (uint256) {
@@ -77,19 +76,18 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             _collateralAmount.safeCastTo96(),
             _debt,
             _debtAmount.safeCastTo96(),
-            _interestRate.safeCastTo128(),
+            _interestRate.safeCastTo64(),
             0,
-            durations[_duration],
-            uint40(_terms)
+            uint40(_terms),
+            LoanStatus.Active
         );
         return createLoan(_loan, _data);
     }
 
     /// @inheritdoc ILoanCoordinator
     function createLoan(Loan memory _loan, bytes calldata _data) public nonReentrant returns (uint256 _tokenId) {
-        if (_loan.duration == type(uint256).max) {
-            revert Coordinator_InvalidDuration();
-        }
+        if (_loan.interestRate >= MAX_INTEREST_RATE) revert Coordinator_InterestRateTooHigh();
+
         loanCount++;
         _tokenId = loanCount;
         Loan memory _newLoan = Loan(
@@ -103,8 +101,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             _loan.debtAmount,
             _loan.interestRate,
             uint64(block.timestamp),
-            _loan.duration,
-            _loan.terms
+            _loan.terms,
+            LoanStatus.Active
         );
 
         loans[_tokenId] = _newLoan;
@@ -131,9 +129,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         console2.log("liquidateLoan");
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
 
-        if (
-            _loan.duration + _loan.startingTime > block.timestamp || _loan.duration == type(uint24).max // Auction in liquidation
-        ) revert Coordinator_LoanNotLiquidatable();
+        if (LoanStatus.Liquidating == _loan.status) revert Coordinator_LoanNotLiquidatable();
 
         console2.log("liquidateLoan");
         uint256 interest = calculateInterest(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
@@ -144,7 +140,6 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         if (!(_terms.auctionLength == 0)) {
             console2.log("auction called");
             _startAuction(uint96(_loanId), totalDebt, _terms.auctionLength);
-            loans[_loanId].duration = type(uint24).max; // Auction off _loan
             _auctionId = auctions.length - 1;
         } else {
             console2.log("auction not called");
@@ -154,33 +149,27 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             _auctionId = 0;
         }
 
-        // Borrower Hook
-        if (isContract(_loan.borrower)) {
-            try Borrower(_loan.borrower).liquidationHook(_loan) {
-                emit BorrowerNotified(_loanId);
-            } catch {}
-        }
         emit LoanLiquidated(_loanId);
     }
 
     /// @inheritdoc ILoanCoordinator
     function repayLoan(uint256 _loanId) public nonReentrant {
-        Loan memory loan = loans[_loanId];
-        uint256 interest = calculateInterest(loan.interestRate, loan.debtAmount, loan.startingTime, block.timestamp);
-        uint256 totalDebt = loan.debtAmount + interest;
-        loan.debtToken.safeTransferFrom(msg.sender, loan.lender, totalDebt);
+        Loan memory _loan = loans[_loanId];
+        uint256 interest = calculateInterest(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
+        uint256 totalDebt = _loan.debtAmount + interest;
+        _loan.debtToken.safeTransferFrom(msg.sender, _loan.lender, totalDebt);
 
-        if (loan.callback && Lender(loan.lender).loanRepaidHook(loan) != Lender.loanRepaidHook.selector) {
+        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan) != Lender.loanRepaidHook.selector) {
             revert Coordinator_LenderUpdateFailed();
         }
 
-        deleteLoan(_loanId, loan.borrower);
-        // Delete corresponding liquidation if the loan is repaid
-        if (loan.duration == type(uint256).max) {
+        deleteLoan(_loanId, _loan.borrower);
+        // Delete corresponding liquidation if the _loan is repaid
+        if (_loan.status == LoanStatus.Liquidating) {
             delete auctions[loanIdToAuction[_loanId]];
         }
 
-        emit LoanRepaid(_loanId, loan.borrower, loan.lender, totalDebt);
+        emit LoanRepaid(_loanId, _loan.borrower, _loan.lender, totalDebt);
     }
 
     /// @inheritdoc ILoanCoordinator
@@ -188,10 +177,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         Loan storage _loan = loans[_loanId];
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
 
-        if (
-            _loan.duration == type(uint256).max // Loan is in liquidation
-                || _loan.duration + _loan.startingTime > block.timestamp
-        ) revert Coordinator_LoanNotAdjustable();
+        if (LoanStatus.Liquidating == _loan.status) revert Coordinator_LoanNotAdjustable();
 
         // Add a check to prevent rate from being too high, or as long as it's lower than the existing rate – maximum rate is 1000% APY
         if (_newRate >= WAD * 10 || (_newRate >= WAD * 10 && _newRate > _loan.interestRate)) {
@@ -202,14 +188,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         _interest = calculateInterest(_loan.interestRate, _loan.debtAmount, _loan.startingTime, block.timestamp);
         _loan.debtAmount = _loan.debtAmount + _interest.safeCastTo96(); // Recalculate debt amount
         _loan.startingTime = uint64(block.timestamp); // Reset starting time
-        _loan.interestRate = uint128(_newRate);
-
-        // Borrower Hook
-        if (isContract(_loan.borrower)) {
-            try Borrower(_loan.borrower).interestRateUpdateHook(_loan, _newRate, _interest) {
-                emit BorrowerNotified(_loan.id);
-            } catch {}
-        }
+        _loan.interestRate = _newRate.safeCastTo64();
 
         emit RateRebalanced(_loanId, _newRate);
     }
@@ -253,12 +232,6 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
                 && Lender(_loan.lender).auctionSettledHook(_loan, _bidAmount, _borrowerReturn)
                     != Lender.auctionSettledHook.selector
         ) revert Coordinator_LenderUpdateFailed();
-
-        if (isContract(_loan.borrower)) {
-            try Borrower(_loan.borrower).auctionSettledHook(_loan, _bidAmount, _borrowerReturn) {
-                emit BorrowerNotified(_auction.loanId);
-            } catch {}
-        }
 
         emit AuctionSettled(_auctionId, msg.sender, _bidAmount);
     }
@@ -310,9 +283,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     function getFlashLoan(address _borrower, ERC20 _token, uint256 _amount, bytes memory _data) external {
         _token.safeTransfer(_borrower, _amount);
 
-        if (!Borrower(_borrower).executeOperation(_token, _amount, msg.sender, _data)) {
-            revert Coordinator_FlashloanFailed();
-        }
+        IFlashLoanReceiver(_borrower).executeOperation(_token, _amount, address(this), _data);
 
         _token.safeTransferFrom(_borrower, address(this), _amount);
         emit Flashloan(_borrower, _token, _amount);
@@ -358,13 +329,5 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
     function getAuction(uint256 _auctionId) external view returns (Auction memory auction) {
         auction = auctions[_auctionId];
-    }
-
-    function isContract(address _addr) private view returns (bool) {
-        uint256 size;
-        assembly {
-            size := extcodesize(_addr)
-        }
-        return size > 0;
     }
 }

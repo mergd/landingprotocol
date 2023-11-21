@@ -3,23 +3,13 @@ pragma solidity ^0.8.17;
 
 import "src/LoanCoordinator.sol";
 
-contract MockBorrower is Borrower {
+contract MockBorrower is IFlashLoanReceiver {
     function test() public {}
-    constructor(ILoanCoordinator _coordinator) Borrower(_coordinator) {}
 
-    /**
-     * @dev Called when loan is liquidated
-     */
-    function liquidationHook(ILoanCoordinator.Loan memory) external override {
-        console2.log("Liquidation hook called");
-    }
+    ILoanCoordinator public coordinator;
 
-    function interestRateUpdateHook(ILoanCoordinator.Loan memory, uint256, uint256) external virtual override {
-        console2.log("Interest rate update hook called");
-    }
-
-    function auctionSettledHook(ILoanCoordinator.Loan memory, uint256, uint256) external override {
-        console2.log("Auction settled hook called");
+    constructor(ILoanCoordinator _coordinator) {
+        coordinator = _coordinator;
     }
 
     /**
