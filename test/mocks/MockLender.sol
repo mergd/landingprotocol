@@ -31,10 +31,6 @@ contract MockLender is Lender {
         return coordinator.liquidateLoan(loan);
     }
 
-    function rebalanceRate(uint256 loan, uint256 newRate) external returns (uint256) {
-        return coordinator.rebalanceRate(loan, newRate);
-    }
-
     function reclaim(uint256 _loanId) external virtual override {
         coordinator.reclaim(_loanId);
     }

@@ -2,7 +2,8 @@
 pragma solidity ^0.8.22;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
-import {ICoordRateCalculator} from "./ICoordRateCalculator.sol";
+import {ICoordRateCalculator} from "src/ICoordRateCalculator.sol";
+import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
 
 interface ILoanCoordinator {
     // 5 words
@@ -21,13 +22,12 @@ interface ILoanCoordinator {
         ERC20 debtToken;
         uint96 debtAmount;
         // 4 words
-        uint64 interestRate;
         uint64 userBorrowIndex;
-        uint40 startingTime;
         uint40 lastUpdateTime;
     }
 
-    // Rate Calculator is immutable – can move to a new term though
+    /// @dev Rate Calculator is immutable – can move to a new term though
+    // 1 word
     struct Term {
         uint24 liquidationBonus;
         uint24 auctionLength;
@@ -45,8 +45,8 @@ interface ILoanCoordinator {
     }
 
     enum LoanState {
-        StableBorrow,
-        VariableBorrow,
+        Inactive,
+        Active,
         Liquidating
     }
 
@@ -101,8 +101,6 @@ interface ILoanCoordinator {
      * @param _debt ERC20 debt token
      * @param _collateralAmount the amount of collateral, denominated in _collateral
      * @param _debtAmount the amount of debt denominated in _debt
-     * @param _interestRate the APR on the loan, scaled by WAD (compounding)
-     * @param _duration index of the duration array
      * @param _terms terms of the loan
      * @param _data data to be passed to the lender contract
      * @return _tokenId the loan id
@@ -114,8 +112,6 @@ interface ILoanCoordinator {
         ERC20 _debt,
         uint256 _collateralAmount,
         uint256 _debtAmount,
-        uint256 _interestRate,
-        uint256 _duration,
         uint256 _terms,
         bytes calldata _data
     ) external returns (uint256);
@@ -137,14 +133,14 @@ interface ILoanCoordinator {
      * @param _from Address to repay from
      */
     function repayLoan(uint256 _loanId, address _from) external;
+
     /**
-     * @dev Rebalance the interest rate, and realize accrued interest as principal
-     * @notice This can only be called for stable borrows
-     * @param _loanId the loan to rebalance
-     * @param _newRate the new rate
-     * @return _interest realized amount
+     * @dev Accrue the borrow index for a term
+     * @param _termId the term to accrue
+     * @return _borrowIndex the new borrow index
      */
-    function rebalanceRate(uint256 _loanId, uint256 _newRate) external returns (uint256 _interest);
+    function accrueBorrowIndex(uint256 _termId) external returns (uint64);
+
     /**
      * @dev Settle the auction based on the current price
      * @param _auctionId the auction to bid on
@@ -172,12 +168,12 @@ interface ILoanCoordinator {
 
     /**
      * Get a flashloan
-     * @param _borrower Callback address
+     * @param _receiver Callback address
      * @param _token Token to borrow
      * @param _amount Amount
      * @param _data Data to pass in callback
      */
-    function getFlashLoan(address _borrower, ERC20 _token, uint256 _amount, bytes memory _data) external;
+    function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external;
 
     function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory loan);
 
