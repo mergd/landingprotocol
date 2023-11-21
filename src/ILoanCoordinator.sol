@@ -163,8 +163,9 @@ interface ILoanCoordinator {
     /**
      * @dev Set the terms of the loan
      * @param _terms the terms to set
+     * @param _rate If the RateCalc is set to 0, the rate will be set to this
      */
-    function setTerms(Term memory _terms) external returns (uint256);
+    function setTerms(Term memory _terms, uint256 _rate) external returns (uint256);
 
     /**
      * Get a flashloan

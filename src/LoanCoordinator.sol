@@ -6,6 +6,7 @@ import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
 import {IFlashloanReceiver} from "src/IFlashloanReceiver.sol";
 import {SafeCastLib} from "@solmate/utils/SafeCastLib.sol";
+import {FixedPointMathLib} from "@solmate/utils/FixedPointMathLib.sol";
 import {Lender} from "./Lender.sol";
 import "./ILoanCoordinator.sol";
 import "forge-std/console2.sol";
@@ -20,6 +21,7 @@ uint256 constant WAD = 1e18;
 contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     using SafeTransferLib for ERC20;
     using SafeCastLib for uint256;
+    using FixedPointMathLib for uint256;
 
     //State
     uint256 public loanCount = 1;
@@ -30,7 +32,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     mapping(uint256 loanId => Loan loan) public loans;
     mapping(address borrower => uint256[] loanIds) public borrowerLoans;
     mapping(uint256 loanId => uint256 borrowerIndex) private borrowerLoanIndex;
-
+    mapping(uint256 termId => uint256 rate) public termIdToFixedRate;
     // Lender loans should be tracked in lender contract
 
     constructor() {}
@@ -135,7 +137,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             console2.log("auction called");
             _startAuction(uint48(_loanId), totalDebt, _terms.auctionLength);
 
-            _loan.state = LoanState.Liquidating;
+            loans[_loanId].state = LoanState.Liquidating;
             _auctionId = auctions.length - 1;
         } else {
             console2.log("auction not called");
@@ -152,12 +154,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     function repayLoan(uint256 _loanId, address _from) public nonReentrant {
         Loan memory _loan = loans[_loanId];
         uint256 _totalDebt = _loan.debtAmount + getAccruedInterest(_loan);
-        _loan.debtToken.safeTransferFrom(_from, _loan.lender, _totalDebt);
-
-        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan) != Lender.loanRepaidHook.selector) {
-            revert Coordinator_LenderUpdateFailed();
-        }
-
+        // Either it doesn't exist or it's already repaid
+        if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
         deleteLoan(_loanId, _loan.borrower);
 
         // Delete corresponding auction if the _loan is repaid
@@ -165,19 +163,28 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             delete auctions[loanIdToAuction[_loanId]];
         }
 
+        // Interactions
+        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan) != Lender.loanRepaidHook.selector) {
+            revert Coordinator_LenderUpdateFailed();
+        }
+        _loan.debtToken.safeTransferFrom(_from, _loan.lender, _totalDebt);
         emit LoanRepaid(_loanId, _loan.borrower, _loan.lender, _totalDebt);
     }
 
+    /// @inheritdoc ILoanCoordinator
     function accrueBorrowIndex(uint256 _termId) public returns (uint64) {
         Term storage _term = loanTerms[_termId];
-        // Loan is variable rate
         if (_term.lastUpdateTime != block.timestamp) {
             uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
-            uint256 _rate = _term.rateCalculator.getNewRate(_termId, _timeElapsed);
-            console2.log("accrueBorrowIndex", _rate);
-            uint256 _newIndex = (_term.baseBorrowIndex * _rate) / WAD;
-            console2.log("accrueBorrowIndex", _newIndex);
-            _term.baseBorrowIndex += _newIndex.safeCastTo64();
+            uint256 _rate;
+            if (_term.rateCalculator != ICoordRateCalculator(address(0))) {
+                _rate = _term.rateCalculator.getNewRate(_termId, _timeElapsed);
+            } else {
+                _rate = termIdToFixedRate[_termId];
+            }
+
+            console2.log("accrueBorrowIndex", (_timeElapsed * _rate) / WAD);
+            _term.baseBorrowIndex += (_timeElapsed.mulWadUp(_rate)).safeCastTo64();
             _term.lastUpdateTime = uint40(block.timestamp);
         }
 
@@ -215,6 +222,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         _loan.collateralToken.safeTransfer(msg.sender, _collateralAmt);
         _loan.debtToken.safeTransfer(_loan.lender, _bidAmount);
 
+        // Transfer auction surplus to borrower
         if (_borrowerReturn > 0) {
             _loan.collateralToken.safeTransfer(_loan.borrower, _borrowerReturn);
         }
@@ -234,16 +242,18 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         Auction memory _auction = auctions[_auctionId];
         Loan memory _loan = loans[_auction.loanId];
         if (_auction.loanId == 0) revert Coordinator_AuctionNotEnded();
-        // todo this can revert if _auction hasn't been touched
+
         uint256 _timeElapsed = block.timestamp - _auction.startTime;
         uint256 _midPoint = _auction.duration / 2;
         // Offer 100% of the debt to be repaid, but increase the amount of _collateral offered
         if (_midPoint >= _timeElapsed) {
             _bidAmount = _auction.recoveryAmount;
-            _collateral = (_timeElapsed * _loan.collateralAmount) / _midPoint;
+            _collateral = _timeElapsed.mulDivDown(_loan.collateralAmount, _midPoint);
         } else if (_timeElapsed < _auction.duration) {
-            // Offer all the _ollateral, but reduce the amount of debt to be offered
-            _bidAmount = _auction.recoveryAmount - (((_timeElapsed - _midPoint) * _auction.recoveryAmount) / _midPoint);
+            // Offer all the collateral, but reduce the amount of debt to be offered
+            _bidAmount =
+                _auction.recoveryAmount - (_timeElapsed - _midPoint).mulDivDown(_auction.recoveryAmount, _midPoint);
+
             _collateral = _loan.collateralAmount;
         } else {
             // Auction lapsed
@@ -280,12 +290,14 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     }
 
     ///@inheritdoc ILoanCoordinator
-    function setTerms(Term memory _term) external returns (uint256 _termId) {
+    function setTerms(Term memory _term, uint256 _rate) external returns (uint256 _termId) {
         if (_term.liquidationBonus > SCALAR * 2 || _term.liquidationBonus < SCALAR) revert Coordinator_InvalidTerms();
         if (_term.auctionLength > 30 days) revert Coordinator_InvalidTerms();
-        if (_term.rateCalculator == ICoordRateCalculator(address(0))) revert Coordinator_InvalidTerms();
 
         _termId = loanTerms.length;
+
+        // Set fixed rate if a Rate Calculator isn't set for this term
+        if (_term.rateCalculator == ICoordRateCalculator(address(0))) termIdToFixedRate[_termId] = _rate;
         loanTerms.push(_term);
         accrueBorrowIndex(_termId);
         emit TermsSet(_termId, _term);
@@ -308,14 +320,25 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         if (_interest) _loan.debtAmount += uint96(getAccruedInterest(_loan));
 
         // Loan doesn't exist
-        if (_loan.borrower == address(0)) revert Coordinator_InvalidLoan();
+        if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
     }
 
     function getAccruedInterest(Loan memory _loan) public view returns (uint256 _accrued) {
         Term memory _term = loanTerms[_loan.termId];
         uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
-        uint256 _rate = _term.rateCalculator.getNewRate(_loan.termId, _timeElapsed);
-        uint256 _newIndex = (_term.baseBorrowIndex * _rate) / WAD;
+        if (block.timestamp - _loan.lastUpdateTime == 0) return 0;
+
+        // Account for most recent interest
+        uint256 _rate;
+        if (_timeElapsed == 0) {
+            _rate = _term.baseBorrowIndex;
+        } else if (_term.rateCalculator != ICoordRateCalculator(address(0))) {
+            _rate = _term.rateCalculator.getNewRate(_loan.termId, _timeElapsed);
+        } else {
+            _rate = termIdToFixedRate[_loan.termId];
+        }
+
+        uint256 _newIndex = _timeElapsed.mulWadUp(_rate) + _term.baseBorrowIndex;
 
         _accrued = (block.timestamp - _loan.lastUpdateTime) * (_newIndex - _loan.userBorrowIndex);
     }

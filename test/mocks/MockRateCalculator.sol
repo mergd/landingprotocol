@@ -6,6 +6,8 @@ import {ICoordRateCalculator} from "src/ICoordRateCalculator.sol";
 contract MockRateCalc is ICoordRateCalculator {
     uint256 rate;
 
+    function test() external {}
+
     constructor(uint256 _rate) {
         rate = _rate;
     }
