@@ -9,7 +9,7 @@ import {IFlashLoanReceiver} from "./IFlashLoanReceiver.sol";
 import "@solmate/utils/SafeCastLib.sol";
 import "prb-math/UD60x18.sol";
 import "./ILoanCoordinator.sol";
-import "forge-std/Console2.sol";
+import "forge-std/console2.sol";
 
 uint256 constant SCALAR = 1e6;
 uint256 constant WAD = 1e18;
