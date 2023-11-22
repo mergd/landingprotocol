@@ -62,16 +62,21 @@ interface ILoanCoordinator {
     /* -------------------------------------------------------------------------- */
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
-    event LoanRepaid(uint256 indexed id, address indexed borrower, address indexed lender, uint256 amount);
     event LoanCreated(uint256 indexed id, Loan loan);
+    event LoanRepaid(
+        uint256 indexed id, address indexed borrower, address indexed lender, uint256 amount, bool isFullRepayment
+    );
+    event LoanLiquidated(uint256 indexed loanId);
+    event CollateralAdded(uint256 indexed loanId, uint256 amount);
+
     event AuctionCreated(Auction auction);
     event AuctionSettled(uint256 indexed auction, address bidder, uint256 price);
-    event RateRebalanced(uint256 indexed loanId, uint256 newRate);
     event AuctionReclaimed(uint256 indexed loanId, uint256 amount);
-    event LoanLiquidated(uint256 indexed loanId);
+    event AuctionClosed(uint256 indexed auction);
+
     event TermsSet(uint256 termId, Term term);
+
     event Flashloan(address borrower, ERC20 token, uint256 amount);
-    event BorrowerNotified(uint256 loanId);
 
     /* -------------------------------------------------------------------------- */
     /*                                   Errors                                   */
@@ -103,7 +108,7 @@ interface ILoanCoordinator {
      * @param _debtAmount the amount of debt denominated in _debt
      * @param _terms terms of the loan
      * @param _data data to be passed to the lender contract
-     * @return _tokenId the loan id
+     * @return _tokenId The ID of the loan
      */
     function createLoan(
         address _lender,
@@ -115,24 +120,27 @@ interface ILoanCoordinator {
         uint256 _terms,
         bytes calldata _data
     ) external returns (uint256);
+
     /**
      * Create a loan
      * @param _loan Loan struct
      * @param _data Additional callback data
      */
     function createLoan(Loan memory _loan, bytes calldata _data) external returns (uint256);
+
     /**
      * @dev Initiate a dutch auction to liquidate the loan
-     * @param _loanId the loan to liquidate
+     * @param _loanId uidate
      * @return _auctionId auction id
      */
     function liquidateLoan(uint256 _loanId) external returns (uint256);
+
     /**
-     * Repay the loan
-     * @param _loanId LoanId to repay
+     * @dev Fully repay the loan
+     * @param _loanId LoanId
      * @param _from Address to repay from
      */
-    function repayLoan(uint256 _loanId, address _from) external;
+    function closeLoan(uint256 _loanId, address _from) external;
 
     /**
      * @dev Accrue the borrow index for a term
@@ -142,24 +150,55 @@ interface ILoanCoordinator {
     function accrueBorrowIndex(uint256 _termId) external returns (uint64);
 
     /**
+     * @dev Repay the loan
+     * @param _loanId The ID of the loan
+     * @param _from The address to repay from
+     * @param _amount The amount to repay
+     */
+    function repayLoan(uint256 _loanId, address _from, uint256 _amount) external;
+
+    /**
+     * @dev Add collateral to a loan
+     * @param _loanId The ID of the loan
+     * @param _from The address to add collateral from
+     * @param _amount The amount to add
+     */
+    function addCollateral(uint256 _loanId, address _from, uint256 _amount) external;
+
+    /* -------------------------------------------------------------------------- */
+    /*                                   Auction                                  */
+    /* -------------------------------------------------------------------------- */
+
+    /**
      * @dev Settle the auction based on the current price
      * @param _auctionId the auction to bid on
      * @notice Unless loan is repaid, no additional interest is accounted for in the liquidation period
      */
     function bid(uint256 _auctionId) external;
+
     /**
      * Get current price of auction
-     * @param _auctionId Id of the auction
+     * @param _auctionId The ID of the auction
      * @return _bidAmount Amount of debt token to bid
      * @return _collateral Amount of collateral token to receive
      */
     function getCurrentPrice(uint256 _auctionId) external view returns (uint256 _bidAmount, uint256 _collateral);
+
     /**
      * @dev Lender can reclaim the collateral if the auction doesn't clear
      * @param _auctionId the auction to reclaim
      */
     function reclaim(uint256 _auctionId) external;
 
+    /**
+     * @dev Stop an ongoing auction
+     * @param _auctionId The ID of the auction
+     *
+     */
+    function stopAuction(uint256 _auctionId) external;
+    /* -------------------------------------------------------------------------- */
+    /*                                    Misc                                    */
+    /* -------------------------------------------------------------------------- */
     /**
      * @dev Set the terms of the loan
      * @param _terms the terms to set
@@ -176,12 +215,17 @@ interface ILoanCoordinator {
      */
     function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external;
 
+    /* -------------------------------------------------------------------------- */
+    /*                                    View                                    */
+    /* -------------------------------------------------------------------------- */
+
     /**
      * Get the details about a loan
      * @param _loanId The ID of the loan
      * @param _interest Whether to include pending interest or not
      */
     function getLoan(uint256 _loanId, bool _interest) external view returns (Loan memory _loan);
+
     /**
      * Calculate pending interest for a loan
      * @param _loan The loan to get the accrued interest for

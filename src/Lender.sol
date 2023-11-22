@@ -56,8 +56,19 @@ abstract contract Lender {
      * Called after _loan is repaid
      * @param _loan Loan struct
      * @param _totalRepayAmount Total amount repaid
+     * @param _fullRepayment True if loan is fully repaid
      */
-    function loanRepaidHook(ILoanCoordinator.Loan memory _loan, uint256 _totalRepayAmount)
+    function loanRepaidHook(ILoanCoordinator.Loan memory _loan, uint256 _totalRepayAmount, bool _fullRepayment)
+        external
+        virtual
+        returns (bytes4);
+
+    /**
+     * Called after collateral is added to a loan
+     * @param _loan Loan struct
+     * @param _collateralAddedAmount Amount of collateral added
+     */
+    function collateralAddedHook(ILoanCoordinator.Loan memory _loan, uint256 _collateralAddedAmount)
         external
         virtual
         returns (bytes4);

@@ -34,6 +34,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     mapping(address borrower => uint256[] loanIds) public borrowerLoans;
     mapping(uint256 loanId => uint256 borrowerIndex) private borrowerLoanIndex;
     mapping(uint256 termId => uint256 rate) public termIdToFixedRate;
+
     // Lender loans should be tracked in lender contract
 
     constructor() {}
@@ -71,7 +72,9 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
     /// @inheritdoc ILoanCoordinator
     function createLoan(Loan memory _loan, bytes calldata _data) public nonReentrant returns (uint256 _tokenId) {
-        if (_loan.state == LoanState.Liquidating) revert Coordinator_InvalidTerms();
+        if (_loan.state == LoanState.Liquidating) {
+            revert Coordinator_InvalidTerms();
+        }
 
         uint64 _baseBorrowIndex = 0;
         _baseBorrowIndex = accrueBorrowIndex(_loan.termId);
@@ -118,7 +121,9 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         console2.log("liquidateLoan");
         if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
 
-        if (_loan.state == LoanState.Liquidating) revert Coordinator_LoanNotLiquidatable();
+        if (_loan.state == LoanState.Liquidating) {
+            revert Coordinator_LoanNotLiquidatable();
+        }
 
         console2.log("liquidateLoan");
 
@@ -153,25 +158,65 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     }
 
     /// @inheritdoc ILoanCoordinator
-    function repayLoan(uint256 _loanId, address _from) public nonReentrant {
-        Loan memory _loan = loans[_loanId];
-        uint256 _totalDebt = _loan.debtAmount + getAccruedInterest(_loan);
-        // Either it doesn't exist or it's already repaid
-        if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
-        deleteLoan(_loanId, _loan.borrower);
+    function closeLoan(uint256 _loanId, address _from) external {
+        repayLoan(_loanId, _from, type(uint256).max);
+    }
 
-        // Delete corresponding auction if the _loan is repaid
-        if (_loan.state == LoanState.Liquidating) {
-            delete auctions[loanIdToAuction[_loanId]];
+    /// @inheritdoc ILoanCoordinator
+    function repayLoan(uint256 _loanId, address _from, uint256 _amount) public nonReentrant {
+        Loan storage _loan = loans[_loanId];
+
+        if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
+
+        uint256 _totalDebt = _loan.debtAmount + getAccruedInterest(_loan);
+        uint256 _repayAmount = min(_amount, _totalDebt);
+        bool _isFullRepayment = _totalDebt == _repayAmount;
+
+        if (_isFullRepayment) {
+            deleteLoan(_loanId, _loan.borrower);
+
+            // Delete corresponding auction if the _loan is repaid
+            if (_loan.state == LoanState.Liquidating) {
+                delete auctions[loanIdToAuction[_loanId]];
+            }
+        } else {
+            // Accrue interest
+            _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
+            _loan.lastUpdateTime = uint40(block.timestamp);
+            _loan.debtAmount -= _repayAmount.safeCastTo96();
         }
 
-        // Interactions
-        if (_loan.callback && Lender(_loan.lender).loanRepaidHook(_loan, _totalDebt) != Lender.loanRepaidHook.selector)
-        {
+        if (
+            _loan.callback
+                && Lender(_loan.lender).loanRepaidHook(_loan, _repayAmount, _isFullRepayment)
+                    != Lender.loanRepaidHook.selector
+        ) {
             revert Coordinator_LenderUpdateFailed();
         }
-        _loan.debtToken.safeTransferFrom(_from, _loan.lender, _totalDebt);
-        emit LoanRepaid(_loanId, _loan.borrower, _loan.lender, _totalDebt);
+
+        _loan.debtToken.safeTransferFrom(_from, _loan.lender, _repayAmount);
+        emit LoanRepaid(_loanId, _loan.borrower, _loan.lender, _repayAmount, _isFullRepayment);
+    }
+
+    /// @inheritdoc ILoanCoordinator
+    function addCollateral(uint256 _loanId, address _from, uint256 _amount) external nonReentrant {
+        Loan storage _loan = loans[_loanId];
+
+        if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
+
+        // Accrue interest
+        _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
+        _loan.lastUpdateTime = uint40(block.timestamp);
+        _loan.collateralAmount += _amount.safeCastTo96();
+
+        if (
+            _loan.callback
+                && Lender(_loan.lender).collateralAddedHook(_loan, _amount) != Lender.collateralAddedHook.selector
+        ) {
+            revert Coordinator_LenderUpdateFailed();
+        }
+
+        _loan.collateralToken.safeTransferFrom(_from, address(this), _amount);
     }
 
     /// @inheritdoc ILoanCoordinator
@@ -268,9 +313,12 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     ///@inheritdoc ILoanCoordinator
     function reclaim(uint256 _auctionId) external nonReentrant {
         Auction memory _auction = auctions[_auctionId];
-        if (_auction.startTime + _auction.duration > block.timestamp) revert Coordinator_AuctionNotEnded();
+        if (_auction.startTime + _auction.duration > block.timestamp) {
+            revert Coordinator_AuctionNotEnded();
+        }
 
         Loan memory loan = loans[_auction.loanId];
+
         delete auctions[_auctionId];
         delete loanIdToAuction[_auction.loanId];
         deleteLoan(_auction.loanId, loan.borrower);
@@ -280,13 +328,29 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit AuctionReclaimed(_auctionId, loan.collateralAmount);
     }
 
+    ///@inheritdoc ILoanCoordinator
+    function stopAuction(uint256 _auctionId) external nonReentrant {
+        Auction memory _auction = auctions[_auctionId];
+        Loan memory _loan = loans[_auction.loanId];
+        if (_loan.lender != msg.sender) revert Coordinator_OnlyLender();
+
+        delete auctions[_auctionId];
+        delete loanIdToAuction[_auction.loanId];
+        deleteLoan(_auction.loanId, _loan.borrower);
+
+        emit AuctionClosed(_auctionId);
+    }
+
     // ============================================================================================
     // Functions: Misc
     // ============================================================================================
     /// @inheritdoc ILoanCoordinator
     function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external {
         _token.safeTransfer(address(_receiver), _amount);
-        if (!_receiver.executeOperation(_token, _amount, msg.sender, _data)) revert Coordinator_FlashloanFailed();
+
+        if (!_receiver.executeOperation(_token, _amount, msg.sender, _data)) {
+            revert Coordinator_FlashloanFailed();
+        }
 
         _token.safeTransferFrom(address(_receiver), address(this), _amount);
         emit Flashloan(address(_receiver), _token, _amount);
@@ -300,7 +364,10 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         _termId = loanTerms.length;
 
         // Set fixed rate if a Rate Calculator isn't set for this term
-        if (_term.rateCalculator == ICoordRateCalculator(address(0))) termIdToFixedRate[_termId] = _rate;
+        if (_term.rateCalculator == ICoordRateCalculator(address(0))) {
+            termIdToFixedRate[_termId] = _rate;
+        }
+
         loanTerms.push(_term);
         accrueBorrowIndex(_termId);
         emit TermsSet(_termId, _term);
@@ -310,6 +377,10 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         // Delete _loanId from borrowerLoans and lenderLoans
         uint256[] storage borrowerLoanList = borrowerLoans[_borrower];
         borrowerLoanList[borrowerLoanIndex[_loanId]] = borrowerLoanList[borrowerLoanList.length - 1];
+    }
+
+    function min(uint256 _a, uint256 _b) internal pure returns (uint256) {
+        return _a < _b ? _a : _b;
     }
 
     // ============================================================================================
@@ -330,6 +401,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     function getAccruedInterest(Loan memory _loan) public view returns (uint256 _accrued) {
         Term memory _term = loanTerms[_loan.termId];
         uint256 _timeElapsed = block.timestamp - _term.lastUpdateTime;
+
         if (block.timestamp - _loan.lastUpdateTime == 0) return 0;
 
         // Account for most recent interest
