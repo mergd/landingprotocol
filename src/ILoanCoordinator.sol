@@ -131,10 +131,11 @@ interface ILoanCoordinator {
 
     /**
      * @dev Initiate a dutch auction to liquidate the loan
-     * @param _loanId uidate
-     * @return _auctionId auction id
+     * @param _loanId The ID of the loan
+     * @return _auctionId The ID of the auction
+     * @return _interest Pending interest on the loan
      */
-    function liquidateLoan(uint256 _loanId) external returns (uint256);
+    function liquidateLoan(uint256 _loanId) external returns (uint256 _auctionId, uint256 _interest);
 
     /**
      * @dev Change the borrow amount (either repay or borrow more)

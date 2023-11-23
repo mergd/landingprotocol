@@ -115,7 +115,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     }
 
     ///@inheritdoc ILoanCoordinator
-    function liquidateLoan(uint256 _loanId) external returns (uint256 _auctionId) {
+    function liquidateLoan(uint256 _loanId) external returns (uint256 _auctionId, uint256 _interest) {
         Loan memory _loan = loans[_loanId];
         Term memory _terms = loanTerms[_loan.termId];
         console2.log("liquidateLoan");
@@ -129,7 +129,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
         // Update the loan if there is interest to be accrued
         uint64 _baseBorrowIndex = accrueBorrowIndex(_loan.termId);
-        uint256 _interest = (block.timestamp - _loan.lastUpdateTime) * (_baseBorrowIndex - _loan.userBorrowIndex);
+        _interest = (block.timestamp - _loan.lastUpdateTime) * (_baseBorrowIndex - _loan.userBorrowIndex);
         console2.log("liquidateLoan1");
         loanTerms[_loan.termId].lastUpdateTime = uint40(block.timestamp);
         loanTerms[_loan.termId].baseBorrowIndex = _baseBorrowIndex;
