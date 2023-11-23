@@ -182,12 +182,16 @@ contract LoanCoordinatorTest is Test {
         borrowMintAndApprove(_borrower, 1e18);
         vm.startPrank(_borrower);
         // Shouldn't revert as the amount paid will only be the full amount
-        coordinator.repayLoan(loanId, _borrower, 1000e18);
+        coordinator.changeDebt(loanId, _borrower, 1000e18);
 
         // Repay the loan
         borrowMintAndApprove(_borrower, 0.5e18);
-        coordinator.repayLoan(loanId, _borrower, 0.5e18);
-        ILoanCoordinator.Loan memory _loan = coordinator.getLoan(loanId, false);
+        vm.expectRevert(); // Loan is already repaid
+        coordinator.changeDebt(loanId, _borrower, 0.5e18);
+
+        // Repay the loan
+        coordinator.changeDebt(loanId0, _borrower, 0.5e18);
+        ILoanCoordinator.Loan memory _loan = coordinator.getLoan(loanId0, false);
         // Loan was only half repaid
         assertEq(_loan.debtAmount, 0.5e18);
     }
@@ -198,7 +202,7 @@ contract LoanCoordinatorTest is Test {
 
         borrowMintAndApprove(_borrower, 1.01 * 1e18);
         vm.startPrank(_borrower);
-        coordinator.closeLoan(loanId, _borrower);
+        coordinator.changeDebt(loanId, _borrower, type(int256).max);
     }
 
     function testCloseWhileAuction() public {
@@ -216,14 +220,14 @@ contract LoanCoordinatorTest is Test {
         borrowMintAndApprove(_borrower, 1e18);
         // Interest has accrued even though auction is still live – so paying just principal should revert
         vm.expectRevert();
-        coordinator.closeLoan(loanId1, _borrower);
+        coordinator.changeDebt(loanId1, _borrower, type(int256).max);
         vm.expectRevert();
-        coordinator.closeLoan(loanId0, _borrower);
+        coordinator.changeDebt(loanId0, _borrower, type(int256).max);
 
         // Repay loan with interest
         borrowMintAndApprove(_borrower, 10e18);
-        coordinator.closeLoan(loanId1, _borrower);
-        coordinator.closeLoan(loanId0, _borrower);
+        coordinator.changeDebt(loanId1, _borrower, type(int256).max);
+        coordinator.changeDebt(loanId0, _borrower, type(int256).max);
     }
 
     function testAddCollateral() public {
@@ -235,8 +239,8 @@ contract LoanCoordinatorTest is Test {
 
         vm.warp(block.timestamp + 10);
         collateralmintAndApprove(_borrower, 2e18);
-        coordinator.addCollateral(loanId1, _borrower, 1e18);
-        coordinator.addCollateral(loanId0, _borrower, 1e18);
+        coordinator.changeCollateral(loanId1, _borrower, 1e18);
+        coordinator.changeCollateral(loanId0, _borrower, 1e18);
     }
 
     function testInvalidTerms() public {
@@ -288,16 +292,73 @@ contract LoanCoordinatorTest is Test {
         // Check the debtAmount calc is correct
         uint256 _balance = _debt.balanceOf(_borrower);
         borrowMintAndApprove(_borrower, loan0__.debtAmount);
-        coordinator.closeLoan(_loan0, _borrower);
+        coordinator.changeDebt(_loan0, _borrower, type(int256).max);
         // Can't repay the same loan twice
         vm.expectRevert();
-        coordinator.closeLoan(_loan0, _borrower);
+        coordinator.changeDebt(_loan0, _borrower, type(int256).max);
         assertEq(_debt.balanceOf(_borrower), _balance);
 
         // Repay the variable rate loan
         borrowMintAndApprove(_borrower, loan1__.debtAmount);
-        coordinator.closeLoan(_loan1, _borrower);
+        coordinator.changeDebt(_loan1, _borrower, type(int256).max);
         assertEq(_debt.balanceOf(_borrower), _balance);
+    }
+
+    function testChangeCollateral() public {
+        uint256 _fixedRateTerm = createTermFixed(1.5 * 1e6, 10, 1e14);
+        uint256 loanId0 = createLoan(_borrower, 0.5 * 1e6, _fixedRateTerm);
+
+        uint256 _term = createTerm(1.5 * 1e6, 10);
+        uint256 loanId1 = createLoan(_borrower, 0.5 * 1e6, _term);
+
+        vm.warp(block.timestamp + 10);
+        collateralmintAndApprove(_borrower, 2e18);
+        vm.expectRevert(); // can't change with 0
+        coordinator.changeCollateral(loanId1, _borrower, 0);
+
+        collateralmintAndApprove(address(_lender), 1e18);
+        vm.expectRevert(); // Collateral changing address isn't the borrower
+        coordinator.changeCollateral(loanId1, address(_lender), -0.1e18);
+
+        // Adding Collateral ok - onbehalf doesn't matter
+        coordinator.changeCollateral(loanId1, address(0), 0.1e18);
+
+        collateralmintAndApprove(_borrower, 1e18);
+        coordinator.changeCollateral(loanId0, _borrower, 1e18);
+        assertEq(_collateral.balanceOf(_borrower), 2e18);
+
+        coordinator.changeCollateral(loanId0, _borrower, -0.5e18);
+        assertEq(_collateral.balanceOf(_borrower), 2.5e18);
+    }
+
+    function testChangeDebt() public {
+        uint256 _fixedRateTerm = createTermFixed(1.5 * 1e6, 10, 1e14);
+        uint256 loanId0 = createLoan(_borrower, 0.5 * 1e6, _fixedRateTerm);
+
+        uint256 _term = createTerm(1.5 * 1e6, 10);
+        uint256 loanId1 = createLoan(_borrower, 0.5 * 1e6, _term);
+
+        vm.warp(block.timestamp + 10);
+        collateralmintAndApprove(_borrower, 2e18);
+        vm.expectRevert(); // can't change with 0
+        coordinator.changeDebt(loanId1, _borrower, 0);
+
+        borrowMintAndApprove(address(_lender), 1e18);
+        vm.expectRevert(); // Borrowing address isn't the borrower
+        coordinator.changeDebt(loanId1, address(_lender), -1e18);
+        // Repaying loans is ok
+        coordinator.changeDebt(loanId1, address(_lender), 0.1e18);
+        coordinator.changeDebt(loanId0, address(_lender), 0.1e18);
+
+        borrowMintAndApprove(_borrower, 2e18);
+        // repay the loan
+        coordinator.changeDebt(loanId0, address(_lender), 2e18);
+
+        // Loan was already repaid
+        vm.expectRevert();
+        coordinator.changeDebt(loanId0, address(_lender), -0.1e18);
+        // Borrow
+        coordinator.changeDebt(loanId1, address(_lender), -0.1e18);
     }
 
     /* -------------------------------------------------------------------------- */

@@ -49,26 +49,29 @@ abstract contract Lender {
     function auctionSettledHook(ILoanCoordinator.Loan memory _loan, uint256 _lenderReturn, uint256 _borrowerReturn)
         external
         virtual
-        returns (bytes4)
-    {}
-
-    /**
-     * Called after _loan is repaid
-     * @param _loan Loan struct
-     * @param _totalRepayAmount Total amount repaid
-     * @param _fullRepayment True if loan is fully repaid
-     */
-    function loanRepaidHook(ILoanCoordinator.Loan memory _loan, uint256 _totalRepayAmount, bool _fullRepayment)
-        external
-        virtual
         returns (bytes4);
 
     /**
-     * Called after collateral is added to a loan
+     * Called after loan is changed
      * @param _loan Loan struct
-     * @param _collateralAddedAmount Amount of collateral added
+     * @param _debtChgAmount Amount of debt token borrowed or repaid (negative)
+     * @param _isFullRepayment True if loan is fully repaid
+     * @param _interest Interest delta since last change
      */
-    function collateralAddedHook(ILoanCoordinator.Loan memory _loan, uint256 _collateralAddedAmount)
+    function debtChangedHook(
+        ILoanCoordinator.Loan memory _loan,
+        int256 _debtChgAmount,
+        bool _isFullRepayment,
+        uint256 _interest
+    ) external virtual returns (bytes4);
+
+    /**
+     * Called after loan has a collateral change
+     * @param _loan Loan struct
+     * @param _collateralChgAmount Amount of collateral added or removed (negative)
+     * @param _interest Interest delta since last change
+     */
+    function collateralChangedHook(ILoanCoordinator.Loan memory _loan, int256 _collateralChgAmount, uint256 _interest)
         external
         virtual
         returns (bytes4);

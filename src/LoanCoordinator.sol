@@ -107,7 +107,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             revert Coordinator_LoanNotVerified();
         }
 
-        _loan.collateralToken.safeTransferFrom(_loan.borrower, address(this), _loan.collateralAmount);
+        _loan.collateralToken.safeTransferFrom(msg.sender, address(this), _loan.collateralAmount);
         _loan.debtToken.safeTransferFrom(_loan.lender, address(this), _loan.debtAmount);
         _loan.debtToken.safeTransfer(_loan.borrower, _loan.debtAmount);
 
@@ -148,75 +148,107 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             loans[_loanId].state = LoanState.Liquidating;
         } else {
             console2.log("auction not called");
-            deleteLoan(_loanId, _loan.borrower);
+            _deleteLoan(_loanId, _loan.borrower);
             console2.log("loan deleted");
             _loan.collateralToken.safeTransfer(msg.sender, _loan.collateralAmount);
             _auctionId = 0;
         }
 
-        emit LoanLiquidated(_loanId);
+        emit LoanLiquidated(_loanId, _loan);
     }
 
     /// @inheritdoc ILoanCoordinator
-    function closeLoan(uint256 _loanId, address _from) external {
-        repayLoan(_loanId, _from, type(uint256).max);
-    }
-
-    /// @inheritdoc ILoanCoordinator
-    function repayLoan(uint256 _loanId, address _from, uint256 _amount) public nonReentrant {
+    function changeDebt(uint256 _loanId, address _onBehalfOf, int256 _amount) external nonReentrant {
         Loan storage _loan = loans[_loanId];
 
         if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
 
-        uint256 _totalDebt = _loan.debtAmount + getAccruedInterest(_loan);
-        uint256 _repayAmount = min(_amount, _totalDebt);
-        bool _isFullRepayment = _totalDebt == _repayAmount;
+        if (_amount == 0) revert Coordinator_InvalidDebtAmount();
+        bool _isFullRepayment = false;
+        uint256 _interest = getAccruedInterest(_loan);
+        uint256 _totalDebt = _loan.debtAmount + _interest;
 
-        if (_isFullRepayment) {
-            deleteLoan(_loanId, _loan.borrower);
-
-            // Delete corresponding auction if the _loan is repaid
-            if (_loan.state == LoanState.Liquidating) {
-                delete auctions[loanIdToAuction[_loanId]];
-            }
-        } else {
+        if (_amount < 0) {
+            if (msg.sender != _loan.borrower) revert Coordinator_OnlyBorrower();
+            // Borrow more
             // Accrue interest
+            uint256 __amount = uint256(-_amount);
+
             _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
             _loan.lastUpdateTime = uint40(block.timestamp);
-            _loan.debtAmount -= _repayAmount.safeCastTo96();
+            _loan.debtAmount += __amount.safeCastTo96();
+
+            _loan.debtToken.safeTransferFrom(_loan.lender, _onBehalfOf, __amount);
+        } else {
+            // Repay debt
+            uint256 _repayAmount = min(uint256(_amount), _totalDebt);
+            _isFullRepayment = _totalDebt == _repayAmount;
+            if (_isFullRepayment && _loan.state == LoanState.Liquidating) {
+                // Delete corresponding auction if the _loan is repaid
+                delete auctions[loanIdToAuction[_loanId]];
+            } else {
+                // Accrue interest
+                _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
+                _loan.lastUpdateTime = uint40(block.timestamp);
+                _loan.debtAmount = (_totalDebt - _repayAmount).safeCastTo96();
+            }
+
+            _loan.debtToken.safeTransferFrom(msg.sender, _loan.lender, _repayAmount);
         }
 
         if (
             _loan.callback
-                && Lender(_loan.lender).loanRepaidHook(_loan, _repayAmount, _isFullRepayment)
-                    != Lender.loanRepaidHook.selector
+                && Lender(_loan.lender).debtChangedHook(_loan, _amount, _isFullRepayment, _interest)
+                    != Lender.debtChangedHook.selector
         ) {
             revert Coordinator_LenderUpdateFailed();
         }
 
-        _loan.debtToken.safeTransferFrom(_from, _loan.lender, _repayAmount);
-        emit LoanRepaid(_loanId, _loan.borrower, _loan.lender, _repayAmount, _isFullRepayment);
+        // Delete loan if fully repaid – done after to ensure Lender can still access loan
+        if (_isFullRepayment) {
+            console2.log("delete loan");
+            _deleteLoan(_loanId, _loan.borrower);
+        }
+
+        emit LoanDebtAdjusted(_loanId, _loan, _amount, _isFullRepayment);
     }
 
     /// @inheritdoc ILoanCoordinator
-    function addCollateral(uint256 _loanId, address _from, uint256 _amount) external nonReentrant {
+    function changeCollateral(uint256 _loanId, address _onBehalfOf, int256 _amount) external nonReentrant {
         Loan storage _loan = loans[_loanId];
 
         if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
 
         // Accrue interest
+        uint256 _interest = getAccruedInterest(_loan);
+        _loan.debtAmount += uint96(_interest);
         _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
         _loan.lastUpdateTime = uint40(block.timestamp);
-        _loan.collateralAmount += _amount.safeCastTo96();
+
+        if (_amount == 0) {
+            revert Coordinator_InvalidCollateralAmount();
+        } else if (_amount < 0) {
+            if (msg.sender != _loan.borrower) revert Coordinator_OnlyBorrower();
+            // Withdraw Collateral
+            // Subtract from collateralAmount
+            _loan.collateralAmount -= uint256(-_amount).safeCastTo96();
+            _loan.collateralToken.safeTransfer(_onBehalfOf, uint256(-_amount));
+        } else {
+            // Deposit more Collateral
+            // Add to collateralAmount
+            _loan.collateralAmount += uint256(_amount).safeCastTo96();
+            _loan.collateralToken.safeTransferFrom(msg.sender, address(this), uint256(_amount));
+        }
 
         if (
             _loan.callback
-                && Lender(_loan.lender).collateralAddedHook(_loan, _amount) != Lender.collateralAddedHook.selector
+                && Lender(_loan.lender).collateralChangedHook(_loan, _amount, _interest)
+                    != Lender.collateralChangedHook.selector
         ) {
             revert Coordinator_LenderUpdateFailed();
         }
 
-        _loan.collateralToken.safeTransferFrom(_from, address(this), _amount);
+        emit LoanCollateralAdjusted(_loanId, _loan, _amount);
     }
 
     /// @inheritdoc ILoanCoordinator
@@ -264,7 +296,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         // Delete the loan
         delete auctions[_auctionId];
         delete loanIdToAuction[_auction.loanId];
-        deleteLoan(_auction.loanId, _loan.borrower);
+        _deleteLoan(_auction.loanId, _loan.borrower);
 
         _loan.debtToken.safeTransferFrom(msg.sender, address(this), _bidAmount);
         _loan.collateralToken.safeTransfer(msg.sender, _collateralAmt);
@@ -313,15 +345,14 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     ///@inheritdoc ILoanCoordinator
     function reclaim(uint256 _auctionId) external nonReentrant {
         Auction memory _auction = auctions[_auctionId];
+        Loan memory loan = loans[_auction.loanId];
         if (_auction.startTime + _auction.duration > block.timestamp) {
             revert Coordinator_AuctionNotEnded();
         }
 
-        Loan memory loan = loans[_auction.loanId];
-
         delete auctions[_auctionId];
         delete loanIdToAuction[_auction.loanId];
-        deleteLoan(_auction.loanId, loan.borrower);
+        _deleteLoan(_auction.loanId, loan.borrower);
 
         loan.collateralToken.safeTransfer(loan.lender, loan.collateralAmount);
 
@@ -336,7 +367,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
         delete auctions[_auctionId];
         delete loanIdToAuction[_auction.loanId];
-        deleteLoan(_auction.loanId, _loan.borrower);
+        _deleteLoan(_auction.loanId, _loan.borrower);
 
         emit AuctionClosed(_auctionId);
     }
@@ -373,7 +404,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         emit TermsSet(_termId, _term);
     }
 
-    function deleteLoan(uint256 _loanId, address _borrower) internal {
+    function _deleteLoan(uint256 _loanId, address _borrower) internal {
+        loans[_loanId].state = LoanState.Inactive;
         // Delete _loanId from borrowerLoans and lenderLoans
         uint256[] storage borrowerLoanList = borrowerLoans[_borrower];
         borrowerLoanList[borrowerLoanIndex[_loanId]] = borrowerLoanList[borrowerLoanList.length - 1];

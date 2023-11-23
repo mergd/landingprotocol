@@ -62,12 +62,10 @@ interface ILoanCoordinator {
     /* -------------------------------------------------------------------------- */
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
-    event LoanCreated(uint256 indexed id, Loan loan);
-    event LoanRepaid(
-        uint256 indexed id, address indexed borrower, address indexed lender, uint256 amount, bool isFullRepayment
-    );
-    event LoanLiquidated(uint256 indexed loanId);
-    event CollateralAdded(uint256 indexed loanId, uint256 amount);
+    event LoanCreated(uint256 indexed loanId, Loan loan);
+    event LoanDebtAdjusted(uint256 indexed loanId, Loan loan, int256 amount, bool isFullRepayment);
+    event LoanLiquidated(uint256 indexed loanId, Loan loan);
+    event LoanCollateralAdjusted(uint256 indexed loanId, Loan loan, int256 amount);
 
     event AuctionCreated(Auction auction);
     event AuctionSettled(uint256 indexed auction, address bidder, uint256 price);
@@ -82,16 +80,19 @@ interface ILoanCoordinator {
     /*                                   Errors                                   */
     /* -------------------------------------------------------------------------- */
 
-    error Coordinator_InvalidDuration();
     error Coordinator_LoanNotVerified();
     error Coordinator_LoanNotLiquidatable();
-    error Coordinator_LoanNotAdjustable();
-    error Coordinator_InterestRateTooHigh();
     error Coordinator_OnlyLender();
-    error Coordinator_AuctionNotEnded();
+    error Coordinator_OnlyBorrower();
     error Coordinator_LenderUpdateFailed();
+
+    error Coordinator_InvalidCollateralAmount();
+    error Coordinator_InvalidDebtAmount();
+
+    error Coordinator_AuctionNotEnded();
     error Coordinator_AuctionEnded(uint256);
     error Coordinator_FlashloanFailed();
+
     error Coordinator_InvalidTerms();
     error Coordinator_InvalidLoan();
 
@@ -136,11 +137,22 @@ interface ILoanCoordinator {
     function liquidateLoan(uint256 _loanId) external returns (uint256);
 
     /**
-     * @dev Fully repay the loan
-     * @param _loanId LoanId
-     * @param _from Address to repay from
+     * @dev Change the borrow amount (either repay or borrow more)
+     * Can revert if the lenderHook fails
+     * @param _loanId The ID of the loan
+     * @param _onBehalfOf The recipient of the borrow (if the borrower is borrowing more)
+     * @param _amount The amount to change the debt by (negative for borrowing more)
      */
-    function closeLoan(uint256 _loanId, address _from) external;
+    function changeDebt(uint256 _loanId, address _onBehalfOf, int256 _amount) external;
+
+    /**
+     * @dev Change the collateral amount (either add or remove collateral)
+     * Can revert if the lenderHook fails
+     * @param _loanId The ID of the loan
+     * @param _onBehalfOf The recipient of the collateral (if the borrower is withdrawing collateral)
+     * @param _amount The amount to change the collateral by (negative for withdrawing)
+     */
+    function changeCollateral(uint256 _loanId, address _onBehalfOf, int256 _amount) external;
 
     /**
      * @dev Accrue the borrow index for a term
@@ -148,22 +160,6 @@ interface ILoanCoordinator {
      * @return _borrowIndex the new borrow index
      */
     function accrueBorrowIndex(uint256 _termId) external returns (uint64);
-
-    /**
-     * @dev Repay the loan
-     * @param _loanId The ID of the loan
-     * @param _from The address to repay from
-     * @param _amount The amount to repay
-     */
-    function repayLoan(uint256 _loanId, address _from, uint256 _amount) external;
-
-    /**
-     * @dev Add collateral to a loan
-     * @param _loanId The ID of the loan
-     * @param _from The address to add collateral from
-     * @param _amount The amount to add
-     */
-    function addCollateral(uint256 _loanId, address _from, uint256 _amount) external;
 
     /* -------------------------------------------------------------------------- */
     /*                                   Auction                                  */

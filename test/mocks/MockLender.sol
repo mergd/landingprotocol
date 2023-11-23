@@ -23,12 +23,22 @@ contract MockLender is Lender {
         return Lender.auctionSettledHook.selector;
     }
 
-    function loanRepaidHook(ILoanCoordinator.Loan memory, uint256, bool) external pure override returns (bytes4) {
-        return Lender.loanRepaidHook.selector;
+    function debtChangedHook(ILoanCoordinator.Loan memory, int256, bool, uint256)
+        external
+        pure
+        override
+        returns (bytes4)
+    {
+        return Lender.debtChangedHook.selector;
     }
 
-    function collateralAddedHook(ILoanCoordinator.Loan memory, uint256) external pure override returns (bytes4) {
-        return Lender.collateralAddedHook.selector;
+    function collateralChangedHook(ILoanCoordinator.Loan memory, int256, uint256)
+        external
+        pure
+        override
+        returns (bytes4)
+    {
+        return Lender.collateralChangedHook.selector;
     }
 
     function liquidate(uint256 loan) external returns (uint256) {
