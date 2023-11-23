@@ -145,7 +145,6 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
             loans[_loanId].state = LoanState.Liquidating;
             _auctionId = auctions.length - 1;
-            loans[_loanId].state = LoanState.Liquidating;
         } else {
             console2.log("auction not called");
             _deleteLoan(_loanId, _loan.borrower);
@@ -165,7 +164,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
 
         if (_amount == 0) revert Coordinator_InvalidDebtAmount();
         bool _isFullRepayment = false;
-        uint256 _interest = getAccruedInterest(_loan);
+        uint64 _baseBorrowIndex = accrueBorrowIndex(_loan.termId);
+        uint256 _interest = (block.timestamp - _loan.lastUpdateTime) * (_baseBorrowIndex - _loan.userBorrowIndex);
         uint256 _totalDebt = _loan.debtAmount + _interest;
 
         if (_amount < 0) {
@@ -174,7 +174,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
             // Accrue interest
             uint256 __amount = uint256(-_amount);
 
-            _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
+            _loan.userBorrowIndex = _baseBorrowIndex;
             _loan.lastUpdateTime = uint40(block.timestamp);
             _loan.debtAmount += __amount.safeCastTo96();
 
@@ -188,7 +188,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
                 delete auctions[loanIdToAuction[_loanId]];
             } else {
                 // Accrue interest
-                _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
+                _loan.userBorrowIndex = _baseBorrowIndex;
                 _loan.lastUpdateTime = uint40(block.timestamp);
                 _loan.debtAmount = (_totalDebt - _repayAmount).safeCastTo96();
             }
@@ -220,9 +220,11 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         if (_loan.state == LoanState.Inactive) revert Coordinator_InvalidLoan();
 
         // Accrue interest
-        uint256 _interest = getAccruedInterest(_loan);
+        uint64 _baseBorrowIndex = accrueBorrowIndex(_loan.termId);
+        uint256 _interest = (block.timestamp - _loan.lastUpdateTime) * (_baseBorrowIndex - _loan.userBorrowIndex);
+
         _loan.debtAmount += uint96(_interest);
-        _loan.userBorrowIndex = uint64(accrueBorrowIndex(_loan.termId));
+        _loan.userBorrowIndex = _baseBorrowIndex;
         _loan.lastUpdateTime = uint40(block.timestamp);
 
         if (_amount == 0) {
@@ -298,9 +300,8 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         delete loanIdToAuction[_auction.loanId];
         _deleteLoan(_auction.loanId, _loan.borrower);
 
-        _loan.debtToken.safeTransferFrom(msg.sender, address(this), _bidAmount);
+        _loan.debtToken.safeTransferFrom(msg.sender, _loan.lender, _bidAmount);
         _loan.collateralToken.safeTransfer(msg.sender, _collateralAmt);
-        _loan.debtToken.safeTransfer(_loan.lender, _bidAmount);
 
         // Transfer auction surplus to borrower
         if (_borrowerReturn > 0) {
