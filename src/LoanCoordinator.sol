@@ -186,6 +186,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
         } else {
             // Repay debt
             uint256 _repayAmount = min(uint256(_amount), _totalDebt);
+            _amount = int256(_repayAmount);
 
             _isFullRepayment = _totalDebt == _repayAmount;
 
