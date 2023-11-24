@@ -1,37 +1,29 @@
 Compiling 1 files with 0.8.22
-Solc 0.8.22 finished in 1.93s
-Compiler run [33msuccessful with warnings:[0m
-[1;33mWarning (2018)[0m[1;37m: Function state mutability can be restricted to pure[0m
-  [34m-->[0m test/mocks/MockBorrower.sol:13:5:
-[34m   |[0m
-[34m13 |[0m     [33mfunction liquidationHook(ILoanCoordinator.Loan memory) external override {[0m
-[34m   |[0m     [1;33m^ (Relevant source part starts here and spans across multiple lines).[0m
-
-[1;33mWarning (2018)[0m[1;37m: Function state mutability can be restricted to pure[0m
-  [34m-->[0m test/mocks/MockBorrower.sol:21:5:
-[34m   |[0m
-[34m21 |[0m     [33mfunction auctionSettledHook(ILoanCoordinator.Loan memory, uint256, uint256) external override {[0m
-[34m   |[0m     [1;33m^ (Relevant source part starts here and spans across multiple lines).[0m
-
+Solc 0.8.22 finished in 2.08s
+Compiler run [32msuccessful![0m
 
 Running 1 test for script/TestnetDeploy.s.sol:Deploy
 [32m[PASS][0m test() (gas: 120)
-Test result: [32mok[0m. [32m1[0m passed; [31m0[0m failed; [33m0[0m skipped; finished in 3.40ms
+Test result: [32mok[0m. [32m1[0m passed; [31m0[0m failed; [33m0[0m skipped; finished in 3.49ms
 
-Running 13 tests for test/LoanCoordinator.t.sol:LoanCoordinatorTest
-[32m[PASS][0m testBid1() (gas: 529392)
-[32m[PASS][0m testBid2() (gas: 511797)
-[32m[PASS][0m testBid3() (gas: 445060)
-[32m[PASS][0m testFailFlashLoan() (gas: 71187)
-[32m[PASS][0m testFlashLoan() (gas: 375788)
-[32m[PASS][0m testInvalidTerms() (gas: 11556)
-[32m[PASS][0m testLend() (gas: 328285)
-[32m[PASS][0m testLiquidate() (gas: 340417)
-[31m[FAIL. Reason: assertion failed][0m testLoanNoAuction() (gas: 351134)
-[32m[PASS][0m testRebalanceRate() (gas: 334377)
-[32m[PASS][0m testReclaim() (gas: 424544)
-[32m[PASS][0m testRepay() (gas: 375356)
-[32m[PASS][0m testRepayWhileAuction() (gas: 448281)
-Test result: [31mFAILED[0m. [32m12[0m passed; [31m1[0m failed; [33m0[0m skipped; finished in 7.52ms
+Running 17 tests for test/LoanCoordinator.t.sol:LoanCoordinatorTest
+[32m[PASS][0m testAddCollateral() (gas: 692249)
+[32m[PASS][0m testBid1() (gas: 525412)
+[32m[PASS][0m testBid2() (gas: 519918)
+[32m[PASS][0m testBid3() (gas: 782872)
+[32m[PASS][0m testChangeCollateral() (gas: 780091)
+[32m[PASS][0m testChangeDebt() (gas: 883427)
+[32m[PASS][0m testClose() (gas: 435822)
+[32m[PASS][0m testCloseWhileAuction() (gas: 774148)
+[32m[PASS][0m testFailFlashLoan() (gas: 73335)
+[32m[PASS][0m testFlashLoan() (gas: 363192)
+[32m[PASS][0m testGetLoan() (gas: 764675)
+[32m[PASS][0m testInvalidTerms() (gas: 11660)
+[32m[PASS][0m testLend() (gas: 310454)
+[32m[PASS][0m testLiquidate() (gas: 379134)
+[32m[PASS][0m testLoanNoAuction() (gas: 392577)
+[32m[PASS][0m testReclaim() (gas: 434975)
+[32m[PASS][0m testRepay() (gas: 678116)
+Test result: [32mok[0m. [32m17[0m passed; [31m0[0m failed; [33m0[0m skipped; finished in 7.23ms
  
-Ran 2 test suites: [32m13[0m tests passed, [31m1[0m failed, [33m0[0m skipped (14 total tests)
+Ran 2 test suites: [32m18[0m tests passed, [31m0[0m failed, [33m0[0m skipped (18 total tests)

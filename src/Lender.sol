@@ -6,9 +6,8 @@ import "./ILoanCoordinator.sol";
 
 abstract contract Lender {
     // Callback contracts can prevent repayments and bidding, so it's somewhat trusted
-    constructor(ILoanCoordinator _coordinator, bool _callback) {
+    constructor(ILoanCoordinator _coordinator) {
         coordinator = _coordinator;
-        callback = _callback;
     }
 
     error Lender_OnlyCoordinator();
@@ -18,7 +17,6 @@ abstract contract Lender {
         _;
     }
 
-    bool public immutable callback; // False - No callbacks, True - Allow callbacks
     ILoanCoordinator public immutable coordinator;
 
     /**

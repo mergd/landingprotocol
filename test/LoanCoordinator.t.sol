@@ -243,9 +243,23 @@ contract LoanCoordinatorTest is Test {
         coordinator.changeCollateral(loanId0, _borrower, 1e18);
     }
 
+    function testStopAuction() public {
+        uint256 _fixedRateTerm = createTermFixed(1.5 * 1e6, 10, 1e14);
+        uint256 loanId0 = createLoan(_borrower, 0.5 * 1e6, _fixedRateTerm);
+        _lender.liquidate(loanId0);
+        _lender.stop(loanId0 - 2);
+
+        borrowMintAndApprove(address(_borrower), 1e18);
+        vm.expectRevert(); // Auction is gone
+        coordinator.bid(loanId0 - 2);
+
+        coordinator.changeCollateral(loanId0, _borrower, -0.1e18);
+    }
+
     function testInvalidTerms() public {
         vm.expectRevert();
         createTerm(2e7, 10);
+        vm.warp(block.timestamp + 10);
     }
 
     function testFlashLoan() public {
@@ -359,6 +373,19 @@ contract LoanCoordinatorTest is Test {
         coordinator.changeDebt(loanId0, address(_lender), -0.1e18);
         // Borrow
         coordinator.changeDebt(loanId1, address(_lender), -0.1e18);
+
+        // Trigger a liquidation, and repay
+        vm.warp(block.timestamp + 10);
+        // Fully Repay the loan
+        _lender.liquidate(loanId1);
+        vm.expectRevert(); // Repay amount should be full
+        coordinator.changeDebt(loanId1, address(_lender), 1e17);
+
+        vm.expectRevert(); // Collateral can't be adjusted while auction is running
+        coordinator.changeCollateral(loanId1, address(_lender), -1e17);
+
+        // Repay the loan
+        coordinator.changeDebt(loanId1, address(_lender), type(int256).max);
     }
 
     /* -------------------------------------------------------------------------- */

@@ -6,7 +6,7 @@ import "../../src/LoanCoordinator.sol";
 contract MockLender is Lender {
     function test() public {}
 
-    constructor(LoanCoordinator _coordinator, ERC20 _debt) Lender(_coordinator, true) {
+    constructor(LoanCoordinator _coordinator, ERC20 _debt) Lender(_coordinator) {
         _debt.approve(address(coordinator), type(uint256).max);
     }
 
@@ -52,5 +52,9 @@ contract MockLender is Lender {
 
     function viewVerifyLoan(ILoanCoordinator.Loan memory, bytes calldata) public view virtual override returns (bool) {
         return true;
+    }
+
+    function stop(uint256 _auctionId) external {
+        coordinator.stopAuction(_auctionId);
     }
 }

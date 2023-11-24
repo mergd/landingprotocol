@@ -14,7 +14,7 @@ interface ILoanCoordinator {
         address borrower;
         // 1 word
         address lender;
-        bool callback;
+        uint96 accruedInterest;
         // 2 words
         ERC20 collateralToken;
         uint96 collateralAmount;
@@ -88,8 +88,11 @@ interface ILoanCoordinator {
 
     error Coordinator_InvalidCollateralAmount();
     error Coordinator_InvalidDebtAmount();
+    error Coordinator_NeedToPayFull();
+    error Coordinator_LiquidationInProgress();
 
     error Coordinator_AuctionNotEnded();
+    error Coordinator_AuctionNotValid();
     error Coordinator_AuctionEnded(uint256);
     error Coordinator_FlashloanFailed();
 
