@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 import {ICoordRateCalculator} from "./ICoordRateCalculator.sol";
-import {IFlashloanReceiver} from "./IFlashloanReceiver.sol";
+import {IFlashLoanReceiver} from "./IFlashLoanReceiver.sol";
 
 interface ILoanCoordinator {
     // 5 words
@@ -213,7 +213,7 @@ interface ILoanCoordinator {
      * @param _amount Amount
      * @param _data Data to pass in callback
      */
-    function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external;
+    function getFlashLoan(IFlashLoanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external;
 
     /* -------------------------------------------------------------------------- */
     /*                                    View                                    */

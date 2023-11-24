@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import {ERC20} from "@solmate/tokens/ERC20.sol";
 
-interface IFlashloanReceiver {
+interface IFlashLoanReceiver {
     /**
      * @dev Flashloan receiver callback
      * @param token ERC20 token

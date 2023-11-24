@@ -2,9 +2,9 @@
 pragma solidity ^0.8.17;
 
 import "src/LoanCoordinator.sol";
-import {IFlashloanReceiver} from "../../src/IFlashloanReceiver.sol";
+import {IFlashLoanReceiver} from "../../src/IFlashLoanReceiver.sol";
 
-contract MockBorrower is IFlashloanReceiver {
+contract MockBorrower is IFlashLoanReceiver {
     function test() public {}
 
     ILoanCoordinator public coordinator;
@@ -27,6 +27,6 @@ contract MockBorrower is IFlashloanReceiver {
 
     function getFlashloan(bool approve, ERC20 collateralToken) external {
         bytes memory data = abi.encode(approve);
-        coordinator.getFlashLoan(IFlashloanReceiver(address(this)), collateralToken, 100, data);
+        coordinator.getFlashLoan(IFlashLoanReceiver(address(this)), collateralToken, 100, data);
     }
 }

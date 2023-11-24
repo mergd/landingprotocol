@@ -7,7 +7,7 @@ import {ReentrancyGuard} from "@solmate/utils/ReentrancyGuard.sol";
 import {SafeCastLib} from "@solmate/utils/SafeCastLib.sol";
 import {FixedPointMathLib} from "@solmate/utils/FixedPointMathLib.sol";
 
-import {IFlashloanReceiver} from "./IFlashloanReceiver.sol";
+import {IFlashLoanReceiver} from "./IFlashLoanReceiver.sol";
 import {Lender} from "./Lender.sol";
 import "./ILoanCoordinator.sol";
 import "forge-std/console2.sol";
@@ -383,7 +383,7 @@ contract LoanCoordinator is ReentrancyGuard, ILoanCoordinator {
     // Functions: Misc
     // ============================================================================================
     /// @inheritdoc ILoanCoordinator
-    function getFlashLoan(IFlashloanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external {
+    function getFlashLoan(IFlashLoanReceiver _receiver, ERC20 _token, uint256 _amount, bytes memory _data) external {
         _token.safeTransfer(address(_receiver), _amount);
 
         if (!_receiver.executeOperation(_token, _amount, msg.sender, _data)) {
